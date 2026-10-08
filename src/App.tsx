@@ -34,6 +34,8 @@ interface Gig {
   status: 'published' | 'draft' | 'suspended';
   featured: boolean;
   extras?: GigExtra[];
+  moderationStatus?: 'approved' | 'flagged' | 'rejected' | 'pending';
+  moderationNotes?: string;
 }
 
 interface Project {
@@ -50,8 +52,10 @@ interface Project {
   deadlineDays: number;
   proposalsCount: number;
   createdAt: string;
-  status: 'open' | 'in_progress' | 'completed' | 'suspended';
+  status: 'open' | 'published' | 'unpublished' | 'suspended' | 'in_progress' | 'completed';
   featured: boolean;
+  moderationStatus?: 'approved' | 'flagged' | 'rejected' | 'pending';
+  moderationNotes?: string;
 }
 
 interface Proposal {
@@ -346,7 +350,69 @@ export default function App() {
   const [editSubName, setEditSubName] = useState('');
   const [selectedCatIds, setSelectedCatIds] = useState<string[]>([]);
   const [selectedSubPairs, setSelectedSubPairs] = useState<{ catId: string; subId: string }[]>([]);
+
+  // Admin Projects Management State
+  const [projectSearchQuery, setProjectSearchQuery] = useState('');
+  const [projectStatusFilter, setProjectStatusFilter] = useState<'all' | 'open' | 'published' | 'unpublished' | 'suspended' | 'in_progress' | 'completed'>('all');
+  const [projectCategoryFilter, setProjectCategoryFilter] = useState('all');
+  const [projectFeaturedFilter, setProjectFeaturedFilter] = useState<'all' | 'featured' | 'regular'>('all');
+
+  // Modals & Drawers for Projects Management
+  const [viewingProject, setViewingProject] = useState<Project | null>(null);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [editProjectForm, setEditProjectForm] = useState({
+    title: '',
+    category: '',
+    subcategory: '',
+    description: '',
+    budgetMin: 0,
+    budgetMax: 0,
+    deadlineDays: 14,
+    status: 'open' as Project['status'],
+    featured: false
+  });
+  const [moderatingProject, setModeratingProject] = useState<Project | null>(null);
+  const [moderationNotes, setModerationNotes] = useState('');
+  const [moderationStatus, setModerationStatus] = useState<'approved' | 'flagged' | 'rejected' | 'pending'>('approved');
+
+  // Admin Gigs Management State
+  const [gigSearchQuery, setGigSearchQuery] = useState('');
+  const [gigStatusFilter, setGigStatusFilter] = useState<'all' | 'published' | 'draft' | 'suspended'>('all');
+  const [gigCategoryFilter, setGigCategoryFilter] = useState('all');
+  const [gigFeaturedFilter, setGigFeaturedFilter] = useState<'all' | 'featured' | 'regular'>('all');
+
+  // Modals & Drawers for Gigs Management
+  const [viewingGig, setViewingGig] = useState<Gig | null>(null);
+  const [editingGig, setEditingGig] = useState<Gig | null>(null);
+  const [editGigForm, setEditGigForm] = useState({
+    title: '',
+    category: '',
+    subcategory: '',
+    description: '',
+    price: 0,
+    deliveryDays: 1,
+    status: 'published' as Gig['status'],
+    featured: false
+  });
+  const [moderatingGig, setModeratingGig] = useState<Gig | null>(null);
+  const [gigModerationNotes, setGigModerationNotes] = useState('');
+  const [gigModerationStatus, setGigModerationStatus] = useState<'approved' | 'flagged' | 'rejected' | 'pending'>('approved');
   
+  // Admin Proposals Management State
+  const [proposalSearchQuery, setProposalSearchQuery] = useState('');
+  const [proposalStatusFilter, setProposalStatusFilter] = useState<'all' | 'pending' | 'accepted' | 'rejected'>('all');
+  const [proposalSort, setProposalSort] = useState<'newest' | 'bid_high' | 'bid_low'>('newest');
+  const [proposalBidMinFilter, setProposalBidMinFilter] = useState('');
+  const [proposalBidMaxFilter, setProposalBidMaxFilter] = useState('');
+  const [viewingProposal, setViewingProposal] = useState<Proposal | null>(null);
+  const [editingProposal, setEditingProposal] = useState<Proposal | null>(null);
+  const [editProposalForm, setEditProposalForm] = useState({
+    bidAmount: 0,
+    deliveryDays: 1,
+    coverLetter: '',
+    status: 'pending' as Proposal['status']
+  });
+
   // Gig Extras state
   const [selectedExtras, setSelectedExtras] = useState<string[]>([]);
   const [newGigExtras, setNewGigExtras] = useState<{ id: string; title: string; price: number }[]>([
@@ -724,9 +790,17 @@ export default function App() {
     }
   };
 
-  const handleStopImpersonation = () => {
+  const handleStopImpersonation = async () => {
+    if (impersonatedUser) {
+      try {
+        await fetch(`/api/admin/users/${impersonatedUser.id}/stop-impersonate`, { method: 'POST' });
+      } catch (err) {
+        console.error('Error stopping impersonation on backend:', err);
+      }
+    }
     setImpersonatedUser(null);
     fetchUserEmails(currentUser.id);
+    fetchAllAdminData();
     alert('Impersonation ended. Returned to Admin Console.');
     navigate('/admin');
   };
@@ -798,6 +872,289 @@ export default function App() {
       fetchAllAdminData();
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    if (!confirm('Are you sure you want to permanently delete this user account? All associated freelance gigs and buyer project postings will also be deleted. This action is irreversible.')) return;
+    try {
+      await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+      setUsersList(prev => prev.filter(u => u.id !== userId));
+      if (inspectingUser?.id === userId) setInspectingUser(null);
+      alert('User account and all associated listings permanently deleted.');
+      fetchAllAdminData();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Admin Projects Management Handlers
+  const handleUpdateProjectStatus = async (projectId: string, newStatus: Project['status']) => {
+    try {
+      const res = await fetch(`/api/admin/projects/${projectId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+      const updated = await res.json();
+      setProjects(prev => prev.map(p => p.id === projectId ? updated : p));
+      if (viewingProject?.id === projectId) setViewingProject(updated);
+      if (editingProject?.id === projectId) setEditingProject(updated);
+      if (moderatingProject?.id === projectId) setModeratingProject(updated);
+      alert(`Project status updated to "${newStatus.toUpperCase()}".`);
+      fetchAllAdminData();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleToggleProjectFeature = async (projectId: string) => {
+    try {
+      const res = await fetch(`/api/admin/projects/${projectId}/feature`, { method: 'PATCH' });
+      const updated = await res.json();
+      setProjects(prev => prev.map(p => p.id === projectId ? updated : p));
+      if (viewingProject?.id === projectId) setViewingProject(updated);
+      fetchAllAdminData();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleOpenEditProjectModal = (p: Project) => {
+    setEditingProject(p);
+    setEditProjectForm({
+      title: p.title || '',
+      category: p.category || 'Development & IT',
+      subcategory: p.subcategory || '',
+      description: p.description || '',
+      budgetMin: p.budgetMin || 0,
+      budgetMax: p.budgetMax || 0,
+      deadlineDays: p.deadlineDays || 14,
+      status: p.status || 'open',
+      featured: !!p.featured
+    });
+  };
+
+  const handleSaveEditProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProject) return;
+    try {
+      const res = await fetch(`/api/admin/projects/${editingProject.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editProjectForm)
+      });
+      const updated = await res.json();
+      setProjects(prev => prev.map(p => p.id === editingProject.id ? updated : p));
+      setEditingProject(null);
+      alert(`Project "${updated.title}" updated successfully.`);
+      fetchAllAdminData();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleOpenModerationModal = (p: Project) => {
+    setModeratingProject(p);
+    setModerationStatus(p.moderationStatus || 'approved');
+    setModerationNotes(p.moderationNotes || '');
+  };
+
+  const handleSaveModeration = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!moderatingProject) return;
+    try {
+      const res = await fetch(`/api/admin/projects/${moderatingProject.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          moderationStatus,
+          moderationNotes
+        })
+      });
+      const updated = await res.json();
+      setProjects(prev => prev.map(p => p.id === moderatingProject.id ? updated : p));
+      setModeratingProject(null);
+      alert(`Moderation review recorded for project "${updated.title}".`);
+      fetchAllAdminData();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteProject = async (projectId: string) => {
+    if (!confirm('Are you sure you want to permanently delete this project?')) return;
+    try {
+      await fetch(`/api/admin/projects/${projectId}`, { method: 'DELETE' });
+      setProjects(prev => prev.filter(p => p.id !== projectId));
+      if (viewingProject?.id === projectId) setViewingProject(null);
+      alert('Project deleted successfully.');
+      fetchAllAdminData();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Admin Gigs / Services Management Handlers
+  const handleUpdateGigStatus = async (gigId: string, newStatus: Gig['status']) => {
+    try {
+      const res = await fetch(`/api/admin/gigs/${gigId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+      const updated = await res.json();
+      setGigs(prev => prev.map(g => g.id === gigId ? updated : g));
+      if (viewingGig?.id === gigId) setViewingGig(updated);
+      alert(`Service status updated to "${newStatus.toUpperCase()}".`);
+      fetchAllAdminData();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleToggleGigFeature = async (gigId: string) => {
+    try {
+      const res = await fetch(`/api/admin/gigs/${gigId}/feature`, { method: 'PATCH' });
+      const updated = await res.json();
+      setGigs(prev => prev.map(g => g.id === gigId ? updated : g));
+      if (viewingGig?.id === gigId) setViewingGig(updated);
+      alert(`Service featured status toggled!`);
+      fetchAllAdminData();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleOpenEditGigModal = (g: Gig) => {
+    setEditingGig(g);
+    setEditGigForm({
+      title: g.title || '',
+      category: g.category || 'Development & IT',
+      subcategory: g.subcategory || '',
+      description: g.description || '',
+      price: g.price || 0,
+      deliveryDays: g.deliveryDays || 1,
+      status: g.status || 'published',
+      featured: !!g.featured
+    });
+  };
+
+  const handleSaveEditGig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingGig) return;
+    try {
+      const res = await fetch(`/api/admin/gigs/${editingGig.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editGigForm)
+      });
+      const updated = await res.json();
+      setGigs(prev => prev.map(g => g.id === editingGig.id ? updated : g));
+      setEditingGig(null);
+      alert(`Service "${updated.title}" updated successfully.`);
+      fetchAllAdminData();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleOpenGigModerationModal = (g: Gig) => {
+    setModeratingGig(g);
+    setGigModerationStatus(g.moderationStatus || 'approved');
+    setGigModerationNotes(g.moderationNotes || '');
+  };
+
+  const handleSaveGigModeration = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!moderatingGig) return;
+    try {
+      const res = await fetch(`/api/admin/gigs/${moderatingGig.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          moderationStatus: gigModerationStatus,
+          moderationNotes: gigModerationNotes
+        })
+      });
+      const updated = await res.json();
+      setGigs(prev => prev.map(g => g.id === moderatingGig.id ? updated : g));
+      setModeratingGig(null);
+      alert(`Moderation review recorded for service/gig "${updated.title}".`);
+      fetchAllAdminData();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteGig = async (gigId: string) => {
+    if (!confirm('Are you sure you want to permanently delete this freelancer service/gig? This action is irreversible.')) return;
+    try {
+      await fetch(`/api/admin/gigs/${gigId}`, { method: 'DELETE' });
+      setGigs(prev => prev.filter(g => g.id !== gigId));
+      if (viewingGig?.id === gigId) setViewingGig(null);
+      alert('Service/Gig deleted successfully.');
+      fetchAllAdminData();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleOpenEditProposalModal = (p: Proposal) => {
+    setEditingProposal(p);
+    setEditProposalForm({
+      bidAmount: p.bidAmount,
+      deliveryDays: p.deliveryDays,
+      coverLetter: p.coverLetter,
+      status: p.status
+    });
+  };
+
+  const handleSaveEditProposal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProposal) return;
+    try {
+      const res = await fetch(`/api/admin/proposals/${editingProposal.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editProposalForm)
+      });
+      const updated = await res.json();
+      setProposals(prev => prev.map(p => p.id === editingProposal.id ? updated : p));
+      setEditingProposal(null);
+      alert(`Proposal #${updated.id} updated successfully.`);
+      fetchAllAdminData();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleUpdateProposalStatus = async (proposalId: string, newStatus: Proposal['status']) => {
+    try {
+      const res = await fetch(`/api/admin/proposals/${proposalId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+      const updated = await res.json();
+      setProposals(prev => prev.map(p => p.id === proposalId ? updated : p));
+      alert(`Proposal status updated to ${newStatus}.`);
+      fetchAllAdminData();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteProposal = async (proposalId: string) => {
+    if (!confirm('Are you sure you want to permanently delete this proposal? This action is irreversible.')) return;
+    try {
+      await fetch(`/api/admin/proposals/${proposalId}`, { method: 'DELETE' });
+      setProposals(prev => prev.filter(p => p.id !== proposalId));
+      if (viewingProposal?.id === proposalId) setViewingProposal(null);
+      alert('Proposal deleted successfully.');
+      fetchAllAdminData();
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -1516,6 +1873,15 @@ export default function App() {
                               >
                                 Impersonate
                               </button>
+
+                              {/* Delete User */}
+                              <button 
+                                onClick={() => handleDeleteUser(u.id)}
+                                className="px-2 py-1.5 bg-red-950/40 text-red-400 border border-red-900/50 font-bold rounded-lg hover:bg-red-900/50 text-[11px]"
+                                title="Delete user permanently"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                             </td>
                           </tr>
                         ))}
@@ -1872,56 +2238,1086 @@ export default function App() {
             </div>
           )}
 
-          {/* MODULE 3: PROJECTS */}
+          {/* MODULE 3: PROJECTS MANAGEMENT */}
           {adminTab === 'projects' && (
-            <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-4">
-              <h3 className="text-base font-bold text-white mb-4">Buyer Request Projects (RFPs)</h3>
-              {projects.map(p => (
-                <div key={p.id} className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+            <div className="space-y-6">
+              {/* Filter & Control Header */}
+              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
                   <div>
-                    <span className="text-xs font-bold text-white block mb-1">{p.title}</span>
-                    <span className="text-xs text-slate-400">Buyer: {p.buyerName} · Budget: ${p.budgetMin} - ${p.budgetMax}</span>
+                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                      <Briefcase className="w-5 h-5 text-emerald-400" />
+                      <span>Projects & Buyer Requests Management</span>
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">Manage, search, filter, edit, publish, unpublish, suspend, restore, feature, and moderate buyer RFPs.</p>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-bold text-emerald-400 uppercase bg-emerald-500/10 px-2.5 py-1 rounded">
-                      {p.status}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400 font-mono bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
+                      {projects.length} Total Projects
                     </span>
-                    <button 
-                      onClick={() => alert(`Project #${p.id} updated.`)}
-                      className="px-3 py-1.5 bg-slate-800 text-slate-300 font-bold rounded-lg text-xs hover:bg-slate-700"
-                    >
-                      Moderate
-                    </button>
                   </div>
                 </div>
-              ))}
+
+                {/* Search & Filters */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {/* Search */}
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                    <input 
+                      type="text" 
+                      placeholder="Search title, buyer, description..." 
+                      value={projectSearchQuery}
+                      onChange={(e) => setProjectSearchQuery(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  {/* Status Filter */}
+                  <div>
+                    <select 
+                      value={projectStatusFilter}
+                      onChange={(e) => setProjectStatusFilter(e.target.value as any)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="all">All Statuses</option>
+                      <option value="open">Open / Active</option>
+                      <option value="published">Published</option>
+                      <option value="unpublished">Unpublished (Draft)</option>
+                      <option value="suspended">Suspended</option>
+                      <option value="in_progress">In Progress</option>
+                      <option value="completed">Completed</option>
+                    </select>
+                  </div>
+
+                  {/* Category Filter */}
+                  <div>
+                    <select 
+                      value={projectCategoryFilter}
+                      onChange={(e) => setProjectCategoryFilter(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="all">All Categories</option>
+                      {categories.map(c => (
+                        <option key={c.id} value={c.name}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Featured Filter */}
+                  <div>
+                    <select 
+                      value={projectFeaturedFilter}
+                      onChange={(e) => setProjectFeaturedFilter(e.target.value as any)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="all">All Listing Types</option>
+                      <option value="featured">Featured Projects Only ★</option>
+                      <option value="regular">Regular Projects Only</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Projects Table */}
+              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-900 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                        <th className="p-4">Project & Buyer</th>
+                        <th className="p-4">Category & Subcategory</th>
+                        <th className="p-4">Budget & Deadline</th>
+                        <th className="p-4">Proposals</th>
+                        <th className="p-4">Featured</th>
+                        <th className="p-4">Status</th>
+                        <th className="p-4 text-right">Admin Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 text-xs text-slate-300">
+                      {projects
+                        .filter(p => {
+                          const q = projectSearchQuery.toLowerCase();
+                          const matchesSearch = !q || 
+                            p.title.toLowerCase().includes(q) || 
+                            p.description.toLowerCase().includes(q) ||
+                            p.buyerName.toLowerCase().includes(q) ||
+                            p.category.toLowerCase().includes(q);
+                          const matchesStatus = projectStatusFilter === 'all' || p.status === projectStatusFilter;
+                          const matchesCat = projectCategoryFilter === 'all' || p.category === projectCategoryFilter;
+                          const matchesFeatured = projectFeaturedFilter === 'all' || 
+                            (projectFeaturedFilter === 'featured' && p.featured) ||
+                            (projectFeaturedFilter === 'regular' && !p.featured);
+                          return matchesSearch && matchesStatus && matchesCat && matchesFeatured;
+                        })
+                        .map(p => (
+                          <tr key={p.id} className="hover:bg-slate-900/50 transition-colors">
+                            <td className="p-4">
+                              <div className="flex items-center gap-3">
+                                <img src={p.buyerAvatar} className="w-10 h-10 rounded-full object-cover ring-2 ring-slate-800" />
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-bold text-white text-sm hover:text-emerald-400 cursor-pointer" onClick={() => setViewingProject(p)}>{p.title}</span>
+                                    {p.featured && (
+                                      <span className="bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold">★ Featured</span>
+                                    )}
+                                  </div>
+                                  <span className="text-[11px] text-slate-400">Buyer: {p.buyerName} · Posted {p.createdAt}</span>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="p-4">
+                              <span className="font-semibold text-slate-200 block">{p.category}</span>
+                              <span className="text-[11px] text-slate-400">{p.subcategory || 'General'}</span>
+                            </td>
+                            <td className="p-4">
+                              <span className="font-extrabold text-emerald-400 block">${p.budgetMin.toLocaleString()} - ${p.budgetMax.toLocaleString()}</span>
+                              <span className="text-[11px] text-slate-400">{p.deadlineDays} Days Delivery</span>
+                            </td>
+                            <td className="p-4">
+                              <span className="px-2.5 py-1 bg-slate-900 border border-slate-800 rounded-lg text-indigo-300 font-bold font-mono">
+                                {p.proposalsCount} bids
+                              </span>
+                            </td>
+                            <td className="p-4">
+                              <button 
+                                onClick={() => handleToggleProjectFeature(p.id)}
+                                className={`px-2.5 py-1 rounded-lg font-bold text-[10px] uppercase border transition-colors ${
+                                  p.featured 
+                                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30' 
+                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'
+                                }`}
+                              >
+                                {p.featured ? '★ Featured' : '+ Feature'}
+                              </button>
+                            </td>
+                            <td className="p-4">
+                              <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase border ${
+                                p.status === 'open' || p.status === 'published' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                p.status === 'suspended' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                                p.status === 'unpublished' ? 'bg-slate-800 text-slate-400 border-slate-700' :
+                                'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
+                              }`}>
+                                {p.status}
+                              </span>
+                            </td>
+                            <td className="p-4 text-right space-x-1.5">
+                              {/* View Details */}
+                              <button 
+                                onClick={() => setViewingProject(p)}
+                                className="px-2.5 py-1.5 bg-slate-800 text-slate-200 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 transition-colors inline-flex items-center gap-1 text-[11px]"
+                                title="View full project details"
+                              >
+                                <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>View</span>
+                              </button>
+
+                              {/* Edit */}
+                              <button 
+                                onClick={() => handleOpenEditProjectModal(p)}
+                                className="px-2.5 py-1.5 bg-slate-800 text-slate-200 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 transition-colors inline-flex items-center gap-1 text-[11px]"
+                                title="Edit project title, category, budget"
+                              >
+                                <Settings className="w-3.5 h-3.5 text-indigo-400" />
+                                <span>Edit</span>
+                              </button>
+
+                              {/* Publish / Unpublish Toggle */}
+                              {p.status === 'unpublished' ? (
+                                <button 
+                                  onClick={() => handleUpdateProjectStatus(p.id, 'open')}
+                                  className="px-2.5 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold rounded-lg hover:bg-emerald-500/20 text-[11px]"
+                                >
+                                  Publish
+                                </button>
+                              ) : p.status === 'open' || p.status === 'published' ? (
+                                <button 
+                                  onClick={() => handleUpdateProjectStatus(p.id, 'unpublished')}
+                                  className="px-2.5 py-1.5 bg-slate-800 text-slate-300 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 text-[11px]"
+                                >
+                                  Unpublish
+                                </button>
+                              ) : null}
+
+                              {/* Suspend / Restore Toggle */}
+                              {p.status === 'suspended' ? (
+                                <button 
+                                  onClick={() => handleUpdateProjectStatus(p.id, 'open')}
+                                  className="px-2.5 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold rounded-lg hover:bg-emerald-500/20 text-[11px]"
+                                >
+                                  Restore
+                                </button>
+                              ) : (
+                                <button 
+                                  onClick={() => handleUpdateProjectStatus(p.id, 'suspended')}
+                                  className="px-2.5 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 font-bold rounded-lg hover:bg-red-500/20 text-[11px]"
+                                >
+                                  Suspend
+                                </button>
+                              )}
+
+                              {/* Moderate */}
+                              <button 
+                                onClick={() => handleOpenModerationModal(p)}
+                                className="px-2.5 py-1.5 bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold rounded-lg hover:bg-purple-500/30 text-[11px]"
+                              >
+                                Moderate
+                              </button>
+
+                              {/* Delete */}
+                              <button 
+                                onClick={() => handleDeleteProject(p.id)}
+                                className="px-2 py-1.5 bg-red-950/40 text-red-400 border border-red-900/50 font-bold rounded-lg hover:bg-red-900/50 text-[11px]"
+                                title="Delete Project"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* VIEW PROJECT DETAILS MODAL */}
+              {viewingProject && (
+                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-3xl w-full space-y-6 max-h-[90vh] overflow-y-auto text-slate-200">
+                    <div className="flex items-start justify-between pb-4 border-b border-slate-800">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-xl font-extrabold text-white">{viewingProject.title}</h3>
+                          {viewingProject.featured && (
+                            <span className="bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded text-xs font-bold">★ Featured</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-400 mt-1">Project ID: #{viewingProject.id} · Category: <span className="text-emerald-400 font-semibold">{viewingProject.category} ({viewingProject.subcategory || 'General'})</span></p>
+                      </div>
+                      <button 
+                        onClick={() => setViewingProject(null)}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl"
+                      >
+                        Close
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                      <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center">
+                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Budget Range</span>
+                        <span className="text-base font-extrabold text-emerald-400">${viewingProject.budgetMin} - ${viewingProject.budgetMax}</span>
+                      </div>
+                      <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center">
+                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Deadline</span>
+                        <span className="text-base font-extrabold text-white">{viewingProject.deadlineDays} Days</span>
+                      </div>
+                      <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center">
+                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Status</span>
+                        <span className="text-base font-extrabold text-indigo-400 uppercase">{viewingProject.status}</span>
+                      </div>
+                      <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center">
+                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Bids Received</span>
+                        <span className="text-base font-extrabold text-purple-400">{viewingProject.proposalsCount}</span>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-2">
+                      <h4 className="text-xs font-bold text-slate-400 uppercase">Project Brief & Description</h4>
+                      <p className="text-xs text-slate-200 leading-relaxed whitespace-pre-wrap">{viewingProject.description}</p>
+                    </div>
+
+                    <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <img src={viewingProject.buyerAvatar} className="w-10 h-10 rounded-full object-cover ring-2 ring-emerald-500/30" />
+                        <div>
+                          <span className="text-xs font-bold text-white block">{viewingProject.buyerName}</span>
+                          <span className="text-[11px] text-slate-400">Buyer ID: {viewingProject.buyerId}</span>
+                        </div>
+                      </div>
+                      <span className="text-xs text-slate-500">Created: {viewingProject.createdAt}</span>
+                    </div>
+
+                    {viewingProject.moderationNotes && (
+                      <div className="bg-purple-950/30 border border-purple-800/50 p-4 rounded-2xl text-xs space-y-1">
+                        <span className="font-bold text-purple-300 block">Moderation Log Notes:</span>
+                        <p className="text-slate-300">{viewingProject.moderationNotes}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* EDIT PROJECT MODAL */}
+              {editingProject && (
+                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-xl w-full space-y-5 text-slate-200">
+                    <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                      <h3 className="text-lg font-bold text-white">Edit Project — {editingProject.title}</h3>
+                      <button 
+                        onClick={() => setEditingProject(null)}
+                        className="text-slate-400 hover:text-white text-xs font-bold"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+
+                    <form onSubmit={handleSaveEditProject} className="space-y-4 text-xs">
+                      <div>
+                        <label className="block text-slate-400 font-bold uppercase mb-1">Project Title</label>
+                        <input 
+                          type="text" 
+                          value={editProjectForm.title}
+                          onChange={(e) => setEditProjectForm(prev => ({ ...prev, title: e.target.value }))}
+                          required
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-slate-400 font-bold uppercase mb-1">Category</label>
+                          <select 
+                            value={editProjectForm.category}
+                            onChange={(e) => setEditProjectForm(prev => ({ ...prev, category: e.target.value }))}
+                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          >
+                            {categories.map(c => (
+                              <option key={c.id} value={c.name}>{c.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 font-bold uppercase mb-1">Subcategory</label>
+                          <input 
+                            type="text" 
+                            value={editProjectForm.subcategory}
+                            onChange={(e) => setEditProjectForm(prev => ({ ...prev, subcategory: e.target.value }))}
+                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-slate-400 font-bold uppercase mb-1">Budget Min ($)</label>
+                          <input 
+                            type="number" 
+                            value={editProjectForm.budgetMin}
+                            onChange={(e) => setEditProjectForm(prev => ({ ...prev, budgetMin: Number(e.target.value) }))}
+                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 font-bold uppercase mb-1">Budget Max ($)</label>
+                          <input 
+                            type="number" 
+                            value={editProjectForm.budgetMax}
+                            onChange={(e) => setEditProjectForm(prev => ({ ...prev, budgetMax: Number(e.target.value) }))}
+                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 font-bold uppercase mb-1">Deadline (Days)</label>
+                          <input 
+                            type="number" 
+                            value={editProjectForm.deadlineDays}
+                            onChange={(e) => setEditProjectForm(prev => ({ ...prev, deadlineDays: Number(e.target.value) }))}
+                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-400 font-bold uppercase mb-1">Project Status</label>
+                        <select 
+                          value={editProjectForm.status}
+                          onChange={(e) => setEditProjectForm(prev => ({ ...prev, status: e.target.value as any }))}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                        >
+                          <option value="open">Open</option>
+                          <option value="published">Published</option>
+                          <option value="unpublished">Unpublished</option>
+                          <option value="suspended">Suspended</option>
+                          <option value="in_progress">In Progress</option>
+                          <option value="completed">Completed</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-400 font-bold uppercase mb-1">Project Description</label>
+                        <textarea 
+                          rows={4}
+                          value={editProjectForm.description}
+                          onChange={(e) => setEditProjectForm(prev => ({ ...prev, description: e.target.value }))}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+
+                      <div className="pt-2">
+                        <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-300">
+                          <input 
+                            type="checkbox" 
+                            checked={editProjectForm.featured}
+                            onChange={(e) => setEditProjectForm(prev => ({ ...prev, featured: e.target.checked }))}
+                            className="rounded border-slate-800 bg-slate-950 text-emerald-500 focus:ring-emerald-500 w-4 h-4"
+                          />
+                          <span>Feature Project on Homepage & Listings</span>
+                        </label>
+                      </div>
+
+                      <div className="pt-4 flex items-center justify-end gap-3">
+                        <button 
+                          type="button"
+                          onClick={() => setEditingProject(null)}
+                          className="px-4 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl hover:bg-slate-700"
+                        >
+                          Cancel
+                        </button>
+                        <button 
+                          type="submit"
+                          className="px-5 py-2 bg-emerald-500 text-slate-950 font-bold rounded-xl hover:bg-emerald-400"
+                        >
+                          Save Project
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+
+              {/* MODERATE PROJECT MODAL */}
+              {moderatingProject && (
+                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full space-y-5 text-slate-200">
+                    <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                      <h3 className="text-lg font-bold text-white">Moderate Project — #{moderatingProject.id}</h3>
+                      <button 
+                        onClick={() => setModeratingProject(null)}
+                        className="text-slate-400 hover:text-white text-xs font-bold"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+
+                    <form onSubmit={handleSaveModeration} className="space-y-4 text-xs">
+                      <div>
+                        <span className="text-slate-400 block font-bold mb-1">Project Title:</span>
+                        <span className="text-white font-extrabold text-sm block">{moderatingProject.title}</span>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-400 font-bold uppercase mb-1">Moderation Verdict</label>
+                        <select 
+                          value={moderationStatus}
+                          onChange={(e) => setModerationStatus(e.target.value as any)}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                        >
+                          <option value="approved">✓ Approved (Complies with Policy)</option>
+                          <option value="flagged">⚠ Flagged for Safety Review</option>
+                          <option value="rejected">✕ Rejected (Policy Violation)</option>
+                          <option value="pending">⏳ Pending Review</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-400 font-bold uppercase mb-1">Moderation Review Notes</label>
+                        <textarea 
+                          rows={3}
+                          placeholder="Provide details regarding policy compliance, safety checks, or rationale..."
+                          value={moderationNotes}
+                          onChange={(e) => setModerationNotes(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+
+                      <div className="pt-4 flex items-center justify-end gap-3">
+                        <button 
+                          type="button"
+                          onClick={() => setModeratingProject(null)}
+                          className="px-4 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl hover:bg-slate-700"
+                        >
+                          Cancel
+                        </button>
+                        <button 
+                          type="submit"
+                          className="px-5 py-2 bg-purple-500 text-white font-bold rounded-xl hover:bg-purple-400"
+                        >
+                          Save Moderation Verdict
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           {/* MODULE 4: SERVICES / GIGS */}
           {adminTab === 'gigs' && (
-            <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-4">
-              <h3 className="text-base font-bold text-white mb-4">Freelancer Gigs & Service Offers</h3>
-              {gigs.map(g => (
-                <div key={g.id} className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+            <div className="space-y-6">
+              {/* Filter & Control Header */}
+              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
                   <div>
-                    <span className="text-xs font-bold text-white block mb-1">{g.title}</span>
-                    <span className="text-xs text-slate-400">Seller: {g.freelancerName} · Category: {g.category}</span>
+                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                      <Layers className="w-5 h-5 text-emerald-400" />
+                      <span>Freelancer Services & Gigs Management</span>
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">Manage, moderate, search, filter, edit, publish, unpublish, suspend, restore, feature, and audit freelancer services.</p>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-extrabold text-emerald-400">${g.price}</span>
-                    <button 
-                      onClick={() => {
-                        setGigs(prev => prev.filter(item => item.id !== g.id));
-                        alert(`Gig #${g.id} suspended.`);
-                      }}
-                      className="px-3 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 font-bold rounded-lg text-xs hover:bg-red-500/20"
-                    >
-                      Suspend Gig
-                    </button>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400 font-mono bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
+                      {gigs.length} Total Services Listed
+                    </span>
                   </div>
                 </div>
-              ))}
+
+                {/* Search & Filters */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {/* Search */}
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                    <input 
+                      type="text" 
+                      placeholder="Search title, freelancer, desc..." 
+                      value={gigSearchQuery}
+                      onChange={(e) => setGigSearchQuery(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  {/* Status Filter */}
+                  <div>
+                    <select 
+                      value={gigStatusFilter}
+                      onChange={(e) => setGigStatusFilter(e.target.value as any)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="all">All Statuses</option>
+                      <option value="published">Published</option>
+                      <option value="draft">Draft</option>
+                      <option value="suspended">Suspended</option>
+                    </select>
+                  </div>
+
+                  {/* Category Filter */}
+                  <div>
+                    <select 
+                      value={gigCategoryFilter}
+                      onChange={(e) => setGigCategoryFilter(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="all">All Categories</option>
+                      {categories.map(c => (
+                        <option key={c.id} value={c.name}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Featured Filter */}
+                  <div>
+                    <select 
+                      value={gigFeaturedFilter}
+                      onChange={(e) => setGigFeaturedFilter(e.target.value as any)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="all">All Listing Types</option>
+                      <option value="featured">Featured Gigs ★</option>
+                      <option value="regular">Regular Gigs Only</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Gigs Grid/List */}
+              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-900 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                        <th className="p-4">Service & Freelancer</th>
+                        <th className="p-4">Category</th>
+                        <th className="p-4">Starting Price & Delivery</th>
+                        <th className="p-4">Rating / Reviews</th>
+                        <th className="p-4">Featured</th>
+                        <th className="p-4">Status</th>
+                        <th className="p-4 text-right">Admin Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 text-xs text-slate-300">
+                      {gigs
+                        .filter(g => {
+                          const q = gigSearchQuery.toLowerCase();
+                          const matchesSearch = !q || 
+                            g.title.toLowerCase().includes(q) || 
+                            g.description.toLowerCase().includes(q) ||
+                            g.freelancerName.toLowerCase().includes(q) ||
+                            g.category.toLowerCase().includes(q);
+                          const matchesStatus = gigStatusFilter === 'all' || g.status === gigStatusFilter;
+                          const matchesCat = gigCategoryFilter === 'all' || g.category === gigCategoryFilter;
+                          const matchesFeatured = gigFeaturedFilter === 'all' || 
+                            (gigFeaturedFilter === 'featured' && g.featured) ||
+                            (gigFeaturedFilter === 'regular' && !g.featured);
+                          return matchesSearch && matchesStatus && matchesCat && matchesFeatured;
+                        })
+                        .map(g => (
+                          <tr key={g.id} className="hover:bg-slate-900/50 transition-colors">
+                            <td className="p-4">
+                              <div className="flex items-center gap-3">
+                                <img src={g.image || 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=800&h=500&fit=crop'} className="w-12 h-12 rounded-xl object-cover ring-2 ring-slate-800 shrink-0" />
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-bold text-white text-sm hover:text-emerald-400 cursor-pointer" onClick={() => setViewingGig(g)}>{g.title}</span>
+                                    {g.featured && (
+                                      <span className="bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold">★ Featured</span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-1">
+                                    <img src={g.freelancerAvatar} className="w-4 h-4 rounded-full object-cover" />
+                                    <span>{g.freelancerName} ({g.freelancerLevel || 'Freelancer'})</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="p-4">
+                              <span className="font-semibold text-slate-200 block">{g.category}</span>
+                              <span className="text-[11px] text-slate-400">{g.subcategory || 'General'}</span>
+                            </td>
+                            <td className="p-4">
+                              <span className="font-extrabold text-emerald-400 block">${g.price.toLocaleString()}</span>
+                              <span className="text-[11px] text-slate-400">{g.deliveryDays} Days Delivery</span>
+                            </td>
+                            <td className="p-4">
+                              <div className="flex items-center gap-1">
+                                <span className="font-bold text-amber-400 font-mono">★ {g.rating || 5.0}</span>
+                                <span className="text-slate-500">({g.reviewsCount || 0})</span>
+                              </div>
+                            </td>
+                            <td className="p-4">
+                              <button 
+                                onClick={() => handleToggleGigFeature(g.id)}
+                                className={`px-2.5 py-1 rounded-lg font-bold text-[10px] uppercase border transition-colors ${
+                                  g.featured 
+                                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30' 
+                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'
+                                }`}
+                              >
+                                {g.featured ? '★ Featured' : '+ Feature'}
+                              </button>
+                            </td>
+                            <td className="p-4">
+                              <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase border ${
+                                g.status === 'published' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                g.status === 'suspended' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                                'bg-slate-800 text-slate-400 border-slate-700'
+                              }`}>
+                                {g.status}
+                              </span>
+                            </td>
+                            <td className="p-4 text-right space-x-1.5 whitespace-nowrap">
+                              {/* View Details */}
+                              <button 
+                                onClick={() => setViewingGig(g)}
+                                className="px-2 py-1.5 bg-slate-800 text-slate-200 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 transition-colors inline-flex items-center gap-1 text-[11px]"
+                                title="Inspect Service"
+                              >
+                                <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>View</span>
+                              </button>
+
+                              {/* Edit */}
+                              <button 
+                                onClick={() => handleOpenEditGigModal(g)}
+                                className="px-2 py-1.5 bg-slate-800 text-slate-200 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 transition-colors inline-flex items-center gap-1 text-[11px]"
+                                title="Edit Service details"
+                              >
+                                <Settings className="w-3.5 h-3.5 text-indigo-400" />
+                                <span>Edit</span>
+                              </button>
+
+                              {/* Publish / Unpublish Toggle */}
+                              {g.status === 'draft' ? (
+                                <button 
+                                  onClick={() => handleUpdateGigStatus(g.id, 'published')}
+                                  className="px-2 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold rounded-lg hover:bg-emerald-500/20 text-[11px]"
+                                >
+                                  Publish
+                                </button>
+                              ) : g.status === 'published' ? (
+                                <button 
+                                  onClick={() => handleUpdateGigStatus(g.id, 'draft')}
+                                  className="px-2 py-1.5 bg-slate-800 text-slate-300 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 text-[11px]"
+                                >
+                                  Unpublish
+                                </button>
+                              ) : null}
+
+                              {/* Suspend / Restore Toggle */}
+                              {g.status === 'suspended' ? (
+                                <button 
+                                  onClick={() => handleUpdateGigStatus(g.id, 'published')}
+                                  className="px-2 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold rounded-lg hover:bg-emerald-500/20 text-[11px]"
+                                >
+                                  Restore
+                                </button>
+                              ) : (
+                                <button 
+                                  onClick={() => handleUpdateGigStatus(g.id, 'suspended')}
+                                  className="px-2 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 font-bold rounded-lg hover:bg-red-500/20 text-[11px]"
+                                >
+                                  Suspend
+                                </button>
+                              )}
+
+                              {/* Moderate */}
+                              <button 
+                                onClick={() => handleOpenGigModerationModal(g)}
+                                className="px-2 py-1.5 bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold rounded-lg hover:bg-purple-500/30 text-[11px]"
+                              >
+                                Moderate
+                              </button>
+
+                              {/* Delete */}
+                              <button 
+                                onClick={() => handleDeleteGig(g.id)}
+                                className="px-2 py-1.5 bg-red-950/40 text-red-400 border border-red-900/50 font-bold rounded-lg hover:bg-red-900/50 text-[11px] inline-flex items-center gap-1"
+                                title="Delete Gig permanently"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Delete</span>
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* INSPECT GIG DETAILS MODAL */}
+              {viewingGig && (
+                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-3xl w-full space-y-6 max-h-[90vh] overflow-y-auto text-slate-200">
+                    <div className="flex items-start justify-between pb-4 border-b border-slate-800">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-xl font-extrabold text-white">{viewingGig.title}</h3>
+                          {viewingGig.featured && (
+                            <span className="bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded text-xs font-bold">★ Featured</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-400 mt-1">Gig ID: #{viewingGig.id} · Category: <span className="text-emerald-400 font-semibold">{viewingGig.category} ({viewingGig.subcategory || 'General'})</span></p>
+                      </div>
+                      <button 
+                        onClick={() => setViewingGig(null)}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl"
+                      >
+                        Close
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-4">
+                        <img 
+                          src={viewingGig.image || 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=800&h=500&fit=crop'} 
+                          className="w-full h-48 rounded-2xl object-cover border border-slate-800 shadow-inner" 
+                        />
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold block">Starting Price</span>
+                            <span className="text-sm font-extrabold text-emerald-400">${viewingGig.price}</span>
+                          </div>
+                          <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold block">Delivery Time</span>
+                            <span className="text-sm font-extrabold text-white">{viewingGig.deliveryDays} Days</span>
+                          </div>
+                          <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold block">Rating</span>
+                            <span className="text-sm font-extrabold text-amber-400">★ {viewingGig.rating || 5.0}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1">
+                          <span className="text-[10px] text-slate-400 uppercase font-bold block">Gig Description</span>
+                          <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{viewingGig.description}</p>
+                        </div>
+
+                        {viewingGig.extras && viewingGig.extras.length > 0 && (
+                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                            <span className="text-[10px] text-slate-400 uppercase font-bold block mb-2">Gig Upgrades & Extras</span>
+                            <div className="space-y-2">
+                              {viewingGig.extras.map(e => (
+                                <div key={e.id} className="flex justify-between items-center text-xs bg-slate-900 px-3 py-2 rounded-lg border border-slate-800">
+                                  <span className="text-slate-200">{e.title}</span>
+                                  <span className="font-bold text-emerald-400">+${e.price}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <img src={viewingGig.freelancerAvatar} className="w-10 h-10 rounded-full object-cover ring-2 ring-emerald-500/30" />
+                        <div>
+                          <span className="text-xs font-bold text-white block">{viewingGig.freelancerName}</span>
+                          <span className="text-[11px] text-slate-400">Freelancer ID: {viewingGig.freelancerId} · Level: {viewingGig.freelancerLevel || 'Pro'}</span>
+                        </div>
+                      </div>
+                      <span className="text-xs text-slate-500">Moderation: {viewingGig.moderationStatus || 'Pending review'}</span>
+                    </div>
+
+                    {viewingGig.moderationNotes && (
+                      <div className="bg-purple-950/30 border border-purple-800/50 p-4 rounded-2xl text-xs space-y-1">
+                        <span className="font-bold text-purple-300 block">Moderation Log Notes:</span>
+                        <p className="text-slate-300">{viewingGig.moderationNotes}</p>
+                      </div>
+                    )}
+
+                    <div className="flex justify-between items-center pt-4 border-t border-slate-800">
+                      <button 
+                        onClick={() => {
+                          if (viewingGig) {
+                            handleDeleteGig(viewingGig.id);
+                            setViewingGig(null);
+                          }
+                        }}
+                        className="px-4 py-2 bg-red-950/40 text-red-400 border border-red-900/50 hover:bg-red-900/50 font-bold rounded-xl flex items-center gap-1.5 text-xs transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        <span>Delete Service</span>
+                      </button>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => {
+                            const g = viewingGig;
+                            setViewingGig(null);
+                            handleOpenEditGigModal(g);
+                          }}
+                          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-indigo-400 border border-slate-700 font-bold rounded-xl flex items-center gap-1 text-xs transition-colors"
+                        >
+                          <Settings className="w-4 h-4" />
+                          <span>Edit Details</span>
+                        </button>
+                        <button 
+                          onClick={() => setViewingGig(null)}
+                          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-colors"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* EDIT GIG DETAILS MODAL */}
+              {editingGig && (
+                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-xl w-full space-y-5 text-slate-200">
+                    <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                      <h3 className="text-lg font-bold text-white">Edit Service — {editingGig.title}</h3>
+                      <button 
+                        onClick={() => setEditingGig(null)}
+                        className="text-slate-400 hover:text-white text-xs font-bold"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+
+                    <form onSubmit={handleSaveEditGig} className="space-y-4 text-xs">
+                      <div>
+                        <label className="block text-slate-400 font-bold uppercase mb-1">Service / Gig Title</label>
+                        <input 
+                          type="text" 
+                          value={editGigForm.title}
+                          onChange={(e) => setEditGigForm(prev => ({ ...prev, title: e.target.value }))}
+                          required
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-slate-400 font-bold uppercase mb-1">Category</label>
+                          <select 
+                            value={editGigForm.category}
+                            onChange={(e) => setEditGigForm(prev => ({ ...prev, category: e.target.value }))}
+                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          >
+                            {categories.map(c => (
+                              <option key={c.id} value={c.name}>{c.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 font-bold uppercase mb-1">Subcategory</label>
+                          <input 
+                            type="text" 
+                            value={editGigForm.subcategory}
+                            onChange={(e) => setEditGigForm(prev => ({ ...prev, subcategory: e.target.value }))}
+                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-slate-400 font-bold uppercase mb-1">Base Price ($)</label>
+                          <input 
+                            type="number" 
+                            value={editGigForm.price}
+                            onChange={(e) => setEditGigForm(prev => ({ ...prev, price: Number(e.target.value) }))}
+                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 font-bold uppercase mb-1">Delivery Time (Days)</label>
+                          <input 
+                            type="number" 
+                            value={editGigForm.deliveryDays}
+                            onChange={(e) => setEditGigForm(prev => ({ ...prev, deliveryDays: Number(e.target.value) }))}
+                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 font-bold uppercase mb-1">Status</label>
+                          <select 
+                            value={editGigForm.status}
+                            onChange={(e) => setEditGigForm(prev => ({ ...prev, status: e.target.value as any }))}
+                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          >
+                            <option value="published">Published</option>
+                            <option value="draft">Draft</option>
+                            <option value="suspended">Suspended</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-400 font-bold uppercase mb-1">Description</label>
+                        <textarea 
+                          rows={4}
+                          value={editGigForm.description}
+                          onChange={(e) => setEditGigForm(prev => ({ ...prev, description: e.target.value }))}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+
+                      <div className="pt-2">
+                        <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-300">
+                          <input 
+                            type="checkbox" 
+                            checked={editGigForm.featured}
+                            onChange={(e) => setEditGigForm(prev => ({ ...prev, featured: e.target.checked }))}
+                            className="rounded border-slate-800 bg-slate-950 text-emerald-500 focus:ring-emerald-500 w-4 h-4"
+                          />
+                          <span>Feature Gig on Homepage & Listings</span>
+                        </label>
+                      </div>
+
+                      <div className="pt-4 flex items-center justify-between border-t border-slate-800">
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            if (editingGig) {
+                              handleDeleteGig(editingGig.id);
+                              setEditingGig(null);
+                            }
+                          }}
+                          className="px-4 py-2 bg-red-950/40 text-red-400 border border-red-900/50 hover:bg-red-900/50 font-bold rounded-xl flex items-center gap-1.5 text-xs transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          <span>Delete Service</span>
+                        </button>
+                        <div className="flex items-center gap-3">
+                          <button 
+                            type="button"
+                            onClick={() => setEditingGig(null)}
+                            className="px-4 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl hover:bg-slate-700 text-xs"
+                          >
+                            Cancel
+                          </button>
+                          <button 
+                            type="submit"
+                            className="px-5 py-2 bg-emerald-500 text-slate-950 font-bold rounded-xl hover:bg-emerald-400 text-xs"
+                          >
+                            Save Gig Details
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+
+              {/* MODERATE GIG MODAL */}
+              {moderatingGig && (
+                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full space-y-5 text-slate-200">
+                    <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                      <h3 className="text-lg font-bold text-white">Moderate Service / Gig</h3>
+                      <button 
+                        onClick={() => setModeratingGig(null)}
+                        className="text-slate-400 hover:text-white text-xs font-bold"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+
+                    <form onSubmit={handleSaveGigModeration} className="space-y-4 text-xs">
+                      <div>
+                        <span className="text-slate-400 block font-bold mb-1">Gig Title:</span>
+                        <span className="text-white font-extrabold text-sm block">{moderatingGig.title}</span>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-400 font-bold uppercase mb-1">Moderation Verdict</label>
+                        <select 
+                          value={gigModerationStatus}
+                          onChange={(e) => setGigModerationStatus(e.target.value as any)}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                        >
+                          <option value="approved">✓ Approved (Complies with Policy)</option>
+                          <option value="flagged">⚠ Flagged for Policy Warning</option>
+                          <option value="rejected">✕ Rejected (Policy Violation)</option>
+                          <option value="pending">⏳ Pending Review</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-400 font-bold uppercase mb-1">Moderation Review Notes</label>
+                        <textarea 
+                          rows={3}
+                          placeholder="Provide rationales, warning notes, or feedback for the seller..."
+                          value={gigModerationNotes}
+                          onChange={(e) => setGigModerationNotes(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+
+                      <div className="pt-4 flex items-center justify-end gap-3">
+                        <button 
+                          type="button"
+                          onClick={() => setModeratingGig(null)}
+                          className="px-4 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl hover:bg-slate-700"
+                        >
+                          Cancel
+                        </button>
+                        <button 
+                          type="submit"
+                          className="px-5 py-2 bg-purple-500 text-white font-bold rounded-xl hover:bg-purple-400"
+                        >
+                          Save Moderation Verdict
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -2195,6 +3591,375 @@ export default function App() {
                   })}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* MODULE 6: PROPOSALS & BIDS MANAGEMENT */}
+          {adminTab === 'proposals' && (
+            <div className="space-y-6">
+              {/* Filter & Control Header */}
+              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+                  <div>
+                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-emerald-400" />
+                      <span>Proposals & Bidding Management</span>
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">Manage, search, filter, edit, approve, reject, or delete freelancer bids and project relationships.</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400 font-mono bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
+                      {proposals.length} Total Bids / Proposals
+                    </span>
+                  </div>
+                </div>
+
+                {/* Search & Filters */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {/* Search */}
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                    <input 
+                      type="text" 
+                      placeholder="Search freelancer, project, cover letter..." 
+                      value={proposalSearchQuery}
+                      onChange={(e) => setProposalSearchQuery(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  {/* Status Filter */}
+                  <div>
+                    <select 
+                      value={proposalStatusFilter}
+                      onChange={(e) => setProposalStatusFilter(e.target.value as any)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="all">All Statuses</option>
+                      <option value="pending">Pending</option>
+                      <option value="accepted">Accepted</option>
+                      <option value="rejected">Rejected</option>
+                    </select>
+                  </div>
+
+                  {/* Sort Filter */}
+                  <div>
+                    <select 
+                      value={proposalSort}
+                      onChange={(e) => setProposalSort(e.target.value as any)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="newest">Sort: Newest First</option>
+                      <option value="bid_high">Sort: Bid Amount High-Low</option>
+                      <option value="bid_low">Sort: Bid Amount Low-High</option>
+                    </select>
+                  </div>
+
+                  {/* Bid Range Filter */}
+                  <div className="flex gap-2">
+                    <input 
+                      type="number" 
+                      placeholder="Min $" 
+                      value={proposalBidMinFilter}
+                      onChange={(e) => setProposalBidMinFilter(e.target.value)}
+                      className="w-1/2 px-2.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    />
+                    <input 
+                      type="number" 
+                      placeholder="Max $" 
+                      value={proposalBidMaxFilter}
+                      onChange={(e) => setProposalBidMaxFilter(e.target.value)}
+                      className="w-1/2 px-2.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Proposals Table */}
+              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-900 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                        <th className="p-4">Freelancer</th>
+                        <th className="p-4">Project / RFP Target</th>
+                        <th className="p-4">Bid Amount & Delivery</th>
+                        <th className="p-4">Status</th>
+                        <th className="p-4">Created At</th>
+                        <th className="p-4 text-right">Admin Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 text-xs text-slate-300">
+                      {proposals
+                        .filter(p => {
+                          const q = proposalSearchQuery.toLowerCase();
+                          const proj = projects.find(projItem => projItem.id === p.projectId);
+                          const projectTitle = proj ? proj.title : '';
+                          const matchesSearch = !q || 
+                            p.freelancerName.toLowerCase().includes(q) || 
+                            p.coverLetter.toLowerCase().includes(q) ||
+                            projectTitle.toLowerCase().includes(q);
+                          const matchesStatus = proposalStatusFilter === 'all' || p.status === proposalStatusFilter;
+                          
+                          const minVal = Number(proposalBidMinFilter) || 0;
+                          const maxVal = Number(proposalBidMaxFilter) || Infinity;
+                          const matchesBid = p.bidAmount >= minVal && p.bidAmount <= maxVal;
+
+                          return matchesSearch && matchesStatus && matchesBid;
+                        })
+                        .sort((a, b) => {
+                          if (proposalSort === 'bid_high') return b.bidAmount - a.bidAmount;
+                          if (proposalSort === 'bid_low') return a.bidAmount - b.bidAmount;
+                          return b.id.localeCompare(a.id); // default/newest
+                        })
+                        .map(p => {
+                          const proj = projects.find(projItem => projItem.id === p.projectId);
+                          return (
+                            <tr key={p.id} className="hover:bg-slate-900/50 transition-colors">
+                              <td className="p-4">
+                                <div className="flex items-center gap-3">
+                                  <img src={p.freelancerAvatar} className="w-10 h-10 rounded-full object-cover ring-2 ring-slate-800 shrink-0" />
+                                  <div>
+                                    <span className="font-bold text-white text-sm block">{p.freelancerName}</span>
+                                    <span className="text-[11px] text-slate-400 truncate max-w-[150px] block">{p.freelancerTitle}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="p-4">
+                                {proj ? (
+                                  <div>
+                                    <span className="font-semibold text-slate-200 block text-xs truncate max-w-[220px]">{proj.title}</span>
+                                    <span className="text-[10px] text-slate-400 font-mono block mt-0.5">Project ID: #{proj.id} · Buyer: {proj.buyerName}</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-red-400 font-semibold">Unknown / Deleted Project</span>
+                                )}
+                              </td>
+                              <td className="p-4">
+                                <span className="font-extrabold text-emerald-400 block text-sm">${p.bidAmount.toLocaleString()}</span>
+                                <span className="text-[11px] text-slate-400">{p.deliveryDays} Days Delivery</span>
+                              </td>
+                              <td className="p-4">
+                                <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase border ${
+                                  p.status === 'accepted' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                  p.status === 'rejected' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                                  'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                                }`}>
+                                  {p.status}
+                                </span>
+                              </td>
+                              <td className="p-4 font-mono text-[11px] text-slate-400">
+                                {p.createdAt || '2026-10-02'}
+                              </td>
+                              <td className="p-4 text-right space-x-1.5 whitespace-nowrap">
+                                {/* View Proposal Details */}
+                                <button 
+                                  onClick={() => setViewingProposal(p)}
+                                  className="px-2.5 py-1.5 bg-slate-800 text-slate-200 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 transition-colors inline-flex items-center gap-1 text-[11px]"
+                                  title="View complete cover letter & details"
+                                >
+                                  <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                                  <span>View</span>
+                                </button>
+
+                                {/* Edit Proposal */}
+                                <button 
+                                  onClick={() => handleOpenEditProposalModal(p)}
+                                  className="px-2.5 py-1.5 bg-slate-800 text-slate-200 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 transition-colors inline-flex items-center gap-1 text-[11px]"
+                                  title="Edit bid parameters"
+                                >
+                                  <Settings className="w-3.5 h-3.5 text-indigo-400" />
+                                  <span>Edit</span>
+                                </button>
+
+                                {/* Quick Accept */}
+                                {p.status !== 'accepted' && (
+                                  <button 
+                                    onClick={() => handleUpdateProposalStatus(p.id, 'accepted')}
+                                    className="px-2.5 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold rounded-lg hover:bg-emerald-500/20 text-[11px]"
+                                    title="Accept Proposal"
+                                  >
+                                    Accept
+                                  </button>
+                                )}
+
+                                {/* Quick Reject */}
+                                {p.status !== 'rejected' && (
+                                  <button 
+                                    onClick={() => handleUpdateProposalStatus(p.id, 'rejected')}
+                                    className="px-2.5 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 font-bold rounded-lg hover:bg-red-500/20 text-[11px]"
+                                    title="Reject Proposal"
+                                  >
+                                    Reject
+                                  </button>
+                                )}
+
+                                {/* Delete */}
+                                <button 
+                                  onClick={() => handleDeleteProposal(p.id)}
+                                  className="px-2 py-1.5 bg-red-950/40 text-red-400 border border-red-900/50 font-bold rounded-lg hover:bg-red-900/50 text-[11px]"
+                                  title="Delete Proposal"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      {proposals.length === 0 && (
+                        <tr>
+                          <td colSpan={6} className="p-8 text-center text-slate-500">No proposals or bids recorded in the platform database.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* VIEW PROPOSAL DETAILS MODAL */}
+              {viewingProposal && (
+                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-2xl w-full space-y-6 max-h-[90vh] overflow-y-auto text-slate-200">
+                    <div className="flex items-start justify-between pb-4 border-b border-slate-800">
+                      <div>
+                        <h3 className="text-lg font-bold text-white">Proposal #{viewingProposal.id} Details</h3>
+                        <p className="text-xs text-slate-400 mt-0.5">Submitted by <span className="text-emerald-400 font-semibold">{viewingProposal.freelancerName}</span></p>
+                      </div>
+                      <button 
+                        onClick={() => setViewingProposal(null)}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl"
+                      >
+                        Close
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3 bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center text-xs">
+                      <div>
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Bid Amount</span>
+                        <span className="text-lg font-extrabold text-emerald-400">${viewingProposal.bidAmount}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Delivery Time</span>
+                        <span className="text-lg font-extrabold text-white">{viewingProposal.deliveryDays} Days</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Current Status</span>
+                        <span className="text-lg font-extrabold text-indigo-400 uppercase">{viewingProposal.status}</span>
+                      </div>
+                    </div>
+
+                    {/* Freelancer Profile Shortcard */}
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center gap-3">
+                      <img src={viewingProposal.freelancerAvatar} className="w-12 h-12 rounded-full object-cover ring-2 ring-emerald-500/20 shrink-0" />
+                      <div>
+                        <span className="text-sm font-bold text-white block">{viewingProposal.freelancerName}</span>
+                        <span className="text-xs text-slate-400">{viewingProposal.freelancerTitle}</span>
+                        <span className="text-[10px] text-slate-500 block mt-0.5">ID: {viewingProposal.freelancerId}</span>
+                      </div>
+                    </div>
+
+                    {/* Target Project Card */}
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase block mb-1.5">Project / Bid Relationship Target</span>
+                      {projects.find(pr => pr.id === viewingProposal.projectId) ? (
+                        <div>
+                          <span className="text-xs font-bold text-white block mb-1">{projects.find(pr => pr.id === viewingProposal.projectId)?.title}</span>
+                          <span className="text-[11px] text-slate-400">Budget Range: <span className="text-emerald-400 font-semibold">${projects.find(pr => pr.id === viewingProposal.projectId)?.budgetMin} - ${projects.find(pr => pr.id === viewingProposal.projectId)?.budgetMax}</span></span>
+                        </div>
+                      ) : (
+                        <span className="text-red-400 text-xs font-semibold">Referenced project has been deleted or suspended.</span>
+                      )}
+                    </div>
+
+                    {/* Description/Cover Letter */}
+                    <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-2 text-xs">
+                      <h4 className="text-[11px] font-bold text-slate-400 uppercase">Cover Letter & Description / Milestones</h4>
+                      <p className="text-slate-200 leading-relaxed whitespace-pre-wrap">{viewingProposal.coverLetter}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* EDIT PROPOSAL MODAL */}
+              {editingProposal && (
+                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-xl w-full space-y-5 text-slate-200">
+                    <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                      <h3 className="text-lg font-bold text-white">Edit Bid Parameters — Proposal #{editingProposal.id}</h3>
+                      <button 
+                        onClick={() => setEditingProposal(null)}
+                        className="text-slate-400 hover:text-white text-xs font-bold"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+
+                    <form onSubmit={handleSaveEditProposal} className="space-y-4 text-xs">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-slate-400 font-bold uppercase mb-1">Bid Amount ($)</label>
+                          <input 
+                            type="number" 
+                            value={editProposalForm.bidAmount}
+                            onChange={(e) => setEditProposalForm(prev => ({ ...prev, bidAmount: Number(e.target.value) }))}
+                            required
+                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 font-bold uppercase mb-1">Delivery Time (Days)</label>
+                          <input 
+                            type="number" 
+                            value={editProposalForm.deliveryDays}
+                            onChange={(e) => setEditProposalForm(prev => ({ ...prev, deliveryDays: Number(e.target.value) }))}
+                            required
+                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-400 font-bold uppercase mb-1">Proposal Status</label>
+                        <select 
+                          value={editProposalForm.status}
+                          onChange={(e) => setEditProposalForm(prev => ({ ...prev, status: e.target.value as any }))}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                        >
+                          <option value="pending">Pending</option>
+                          <option value="accepted">Accepted</option>
+                          <option value="rejected">Rejected</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-400 font-bold uppercase mb-1">Cover Letter & Milestones / Deliverables</label>
+                        <textarea 
+                          rows={6}
+                          value={editProposalForm.coverLetter}
+                          onChange={(e) => setEditProposalForm(prev => ({ ...prev, coverLetter: e.target.value }))}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+
+                      <div className="pt-4 flex items-center justify-end gap-3">
+                        <button 
+                          type="button"
+                          onClick={() => setEditingProposal(null)}
+                          className="px-4 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl hover:bg-slate-700"
+                        >
+                          Cancel
+                        </button>
+                        <button 
+                          type="submit"
+                          className="px-5 py-2 bg-emerald-500 text-slate-950 font-bold rounded-xl hover:bg-emerald-400"
+                        >
+                          Save Proposal
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

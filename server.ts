@@ -74,6 +74,8 @@ interface Gig {
   status: 'published' | 'draft' | 'suspended';
   featured: boolean;
   extras?: GigExtra[];
+  moderationStatus?: 'approved' | 'flagged' | 'rejected' | 'pending';
+  moderationNotes?: string;
 }
 
 interface Project {
@@ -90,8 +92,10 @@ interface Project {
   deadlineDays: number;
   proposalsCount: number;
   createdAt: string;
-  status: 'open' | 'in_progress' | 'completed' | 'suspended';
+  status: 'open' | 'published' | 'unpublished' | 'suspended' | 'in_progress' | 'completed';
   featured: boolean;
+  moderationStatus?: 'approved' | 'flagged' | 'rejected' | 'pending';
+  moderationNotes?: string;
 }
 
 interface Proposal {
@@ -1030,6 +1034,183 @@ app.post('/api/projects', (req, res) => {
   res.json(newProj);
 });
 
+// Admin Projects Management Endpoints
+app.patch('/api/admin/projects/:id', (req, res) => {
+  const p = projects.find(proj => proj.id === req.params.id);
+  if (!p) return res.status(404).json({ error: 'Project not found' });
+
+  if (req.body.title !== undefined) p.title = req.body.title;
+  if (req.body.category !== undefined) p.category = req.body.category;
+  if (req.body.subcategory !== undefined) p.subcategory = req.body.subcategory;
+  if (req.body.description !== undefined) p.description = req.body.description;
+  if (req.body.budgetMin !== undefined) p.budgetMin = Number(req.body.budgetMin);
+  if (req.body.budgetMax !== undefined) p.budgetMax = Number(req.body.budgetMax);
+  if (req.body.deadlineDays !== undefined) p.deadlineDays = Number(req.body.deadlineDays);
+  if (req.body.status !== undefined) p.status = req.body.status;
+  if (req.body.featured !== undefined) p.featured = Boolean(req.body.featured);
+  if (req.body.moderationStatus !== undefined) p.moderationStatus = req.body.moderationStatus;
+  if (req.body.moderationNotes !== undefined) p.moderationNotes = req.body.moderationNotes;
+
+  auditLogs.unshift({
+    id: 'log_' + Date.now(),
+    actor: 'Admin Chief',
+    role: 'super_admin',
+    action: 'PROJECT_EDITED',
+    target: `Project "${p.title}"`,
+    details: `Updated project parameters, category, budget, or moderation status`,
+    timestamp: new Date().toLocaleString()
+  });
+
+  res.json(p);
+});
+
+app.patch('/api/admin/projects/:id/status', (req, res) => {
+  const p = projects.find(proj => proj.id === req.params.id);
+  if (!p) return res.status(404).json({ error: 'Project not found' });
+
+  const oldStatus = p.status;
+  p.status = req.body.status;
+
+  auditLogs.unshift({
+    id: 'log_' + Date.now(),
+    actor: 'Admin Chief',
+    role: 'super_admin',
+    action: `PROJECT_STATUS_${req.body.status.toUpperCase()}`,
+    target: `Project "${p.title}"`,
+    details: `Changed project status from "${oldStatus}" to "${req.body.status}"`,
+    timestamp: new Date().toLocaleString()
+  });
+
+  res.json(p);
+});
+
+app.patch('/api/admin/projects/:id/feature', (req, res) => {
+  const p = projects.find(proj => proj.id === req.params.id);
+  if (!p) return res.status(404).json({ error: 'Project not found' });
+
+  p.featured = !p.featured;
+
+  auditLogs.unshift({
+    id: 'log_' + Date.now(),
+    actor: 'Admin Chief',
+    role: 'super_admin',
+    action: p.featured ? 'PROJECT_FEATURED' : 'PROJECT_UNFEATURED',
+    target: `Project "${p.title}"`,
+    details: `${p.featured ? 'Featured' : 'Unfeatured'} project on platform homepage & listings`,
+    timestamp: new Date().toLocaleString()
+  });
+
+  res.json(p);
+});
+
+app.delete('/api/admin/projects/:id', (req, res) => {
+  const index = projects.findIndex(proj => proj.id === req.params.id);
+  if (index === -1) return res.status(404).json({ error: 'Project not found' });
+
+  const deleted = projects[index];
+  projects.splice(index, 1);
+
+  auditLogs.unshift({
+    id: 'log_' + Date.now(),
+    actor: 'Admin Chief',
+    role: 'super_admin',
+    action: 'PROJECT_DELETED',
+    target: `Project "${deleted.title}"`,
+    details: `Permanently removed project #${deleted.id} by ${deleted.buyerName}`,
+    timestamp: new Date().toLocaleString()
+  });
+
+  res.json({ success: true, id: deleted.id });
+});
+
+// Admin Gigs / Services Management Endpoints
+app.patch('/api/admin/gigs/:id', (req, res) => {
+  const g = gigs.find(gig => gig.id === req.params.id);
+  if (!g) return res.status(404).json({ error: 'Gig/Service not found' });
+
+  if (req.body.title !== undefined) g.title = req.body.title;
+  if (req.body.category !== undefined) g.category = req.body.category;
+  if (req.body.subcategory !== undefined) g.subcategory = req.body.subcategory;
+  if (req.body.description !== undefined) g.description = req.body.description;
+  if (req.body.price !== undefined) g.price = Number(req.body.price);
+  if (req.body.deliveryDays !== undefined) g.deliveryDays = Number(req.body.deliveryDays);
+  if (req.body.status !== undefined) g.status = req.body.status;
+  if (req.body.featured !== undefined) g.featured = Boolean(req.body.featured);
+  if (req.body.moderationStatus !== undefined) g.moderationStatus = req.body.moderationStatus;
+  if (req.body.moderationNotes !== undefined) g.moderationNotes = req.body.moderationNotes;
+
+  auditLogs.unshift({
+    id: 'log_' + Date.now(),
+    actor: 'Admin Chief',
+    role: 'super_admin',
+    action: 'GIG_EDITED',
+    target: `Gig "${g.title}"`,
+    details: `Updated gig specifications, pricing, delivery, or moderation verdict: "${g.moderationStatus || 'none'}"`,
+    timestamp: new Date().toLocaleString()
+  });
+
+  res.json(g);
+});
+
+app.patch('/api/admin/gigs/:id/status', (req, res) => {
+  const g = gigs.find(gig => gig.id === req.params.id);
+  if (!g) return res.status(404).json({ error: 'Gig/Service not found' });
+
+  const oldStatus = g.status;
+  g.status = req.body.status;
+
+  auditLogs.unshift({
+    id: 'log_' + Date.now(),
+    actor: 'Admin Chief',
+    role: 'super_admin',
+    action: `GIG_STATUS_${req.body.status.toUpperCase()}`,
+    target: `Gig "${g.title}"`,
+    details: `Changed service status from "${oldStatus}" to "${req.body.status}"`,
+    timestamp: new Date().toLocaleString()
+  });
+
+  res.json(g);
+});
+
+app.patch('/api/admin/gigs/:id/feature', (req, res) => {
+  const g = gigs.find(gig => gig.id === req.params.id);
+  if (!g) return res.status(404).json({ error: 'Gig/Service not found' });
+
+  g.featured = !g.featured;
+
+  auditLogs.unshift({
+    id: 'log_' + Date.now(),
+    actor: 'Admin Chief',
+    role: 'super_admin',
+    action: g.featured ? 'GIG_FEATURED' : 'GIG_UNFEATURED',
+    target: `Gig "${g.title}"`,
+    details: `${g.featured ? 'Featured' : 'Unfeatured'} freelancer service on marketplace home & listings`,
+    timestamp: new Date().toLocaleString()
+  });
+
+  res.json(g);
+});
+
+app.delete('/api/admin/gigs/:id', (req, res) => {
+  const index = gigs.findIndex(gig => gig.id === req.params.id);
+  if (index === -1) return res.status(404).json({ error: 'Gig/Service not found' });
+
+  const deleted = gigs[index];
+  gigs.splice(index, 1);
+
+  auditLogs.unshift({
+    id: 'log_' + Date.now(),
+    actor: 'Admin Chief',
+    role: 'super_admin',
+    action: 'GIG_DELETED',
+    target: `Gig "${deleted.title}"`,
+    details: `Permanently deleted freelancer gig #${deleted.id} by ${deleted.freelancerName}`,
+    timestamp: new Date().toLocaleString()
+  });
+
+  res.json({ success: true, id: deleted.id });
+});
+
 app.post('/api/proposals', (req, res) => {
   const newProp: Proposal = {
     id: 'prop_' + Date.now(),
@@ -1065,6 +1246,75 @@ app.post('/api/orders', (req, res) => {
   };
   orders.unshift(newOrd);
   res.json(newOrd);
+});
+
+// Admin Proposals Management Endpoints
+app.patch('/api/admin/proposals/:id', (req, res) => {
+  const p = proposals.find(prop => prop.id === req.params.id);
+  if (!p) return res.status(404).json({ error: 'Proposal not found' });
+
+  if (req.body.coverLetter !== undefined) p.coverLetter = req.body.coverLetter;
+  if (req.body.bidAmount !== undefined) p.bidAmount = Number(req.body.bidAmount);
+  if (req.body.deliveryDays !== undefined) p.deliveryDays = Number(req.body.deliveryDays);
+  if (req.body.status !== undefined) p.status = req.body.status;
+
+  auditLogs.unshift({
+    id: 'log_' + Date.now(),
+    actor: 'Admin Chief',
+    role: 'super_admin',
+    action: 'PROPOSAL_EDITED',
+    target: `Proposal #${p.id}`,
+    details: `Updated bid parameters ($${p.bidAmount}), delivery days (${p.deliveryDays}d), or status (${p.status}) for freelancer ${p.freelancerName}`,
+    timestamp: new Date().toLocaleString()
+  });
+
+  res.json(p);
+});
+
+app.patch('/api/admin/proposals/:id/status', (req, res) => {
+  const p = proposals.find(prop => prop.id === req.params.id);
+  if (!p) return res.status(404).json({ error: 'Proposal not found' });
+
+  const oldStatus = p.status;
+  p.status = req.body.status;
+
+  auditLogs.unshift({
+    id: 'log_' + Date.now(),
+    actor: 'Admin Chief',
+    role: 'super_admin',
+    action: `PROPOSAL_STATUS_${req.body.status.toUpperCase()}`,
+    target: `Proposal #${p.id}`,
+    details: `Changed proposal status from "${oldStatus}" to "${req.body.status}" for freelancer ${p.freelancerName}`,
+    timestamp: new Date().toLocaleString()
+  });
+
+  res.json(p);
+});
+
+app.delete('/api/admin/proposals/:id', (req, res) => {
+  const index = proposals.findIndex(prop => prop.id === req.params.id);
+  if (index === -1) return res.status(404).json({ error: 'Proposal not found' });
+
+  const deleted = proposals[index];
+  proposals.splice(index, 1);
+
+  // Decrement proposalsCount on project if project exists
+  const proj = projects.find(p => p.id === deleted.projectId);
+  if (proj && proj.proposalsCount > 0) {
+    proj.proposalsCount -= 1;
+  }
+
+  auditLogs.unshift({
+    id: 'log_' + Date.now(),
+    actor: 'Admin Chief',
+    role: 'super_admin',
+    action: 'PROPOSAL_DELETED',
+    target: `Proposal #${deleted.id}`,
+    details: `Permanently removed proposal #${deleted.id} by freelancer ${deleted.freelancerName} from project #${deleted.projectId}`,
+    timestamp: new Date().toLocaleString()
+  });
+
+  res.json({ success: true, id: deleted.id });
 });
 
 // User Management Endpoints
@@ -1141,6 +1391,23 @@ app.post('/api/admin/users/:id/impersonate', (req, res) => {
   res.json({ success: true, user: u });
 });
 
+app.post('/api/admin/users/:id/stop-impersonate', (req, res) => {
+  const u = users.find(user => user.id === req.params.id);
+  if (!u) return res.status(404).json({ error: 'User not found' });
+
+  auditLogs.unshift({
+    id: 'log_' + Date.now(),
+    actor: 'Admin Chief',
+    role: 'super_admin',
+    action: 'USER_IMPERSONATION_ENDED',
+    target: `User ${u.name}`,
+    details: `Safely ended administrative impersonation session for ${u.email}`,
+    timestamp: new Date().toLocaleString()
+  });
+
+  res.json({ success: true, user: u });
+});
+
 app.patch('/api/admin/users/:id/verify', (req, res) => {
   const u = users.find(user => user.id === req.params.id);
   if (!u) return res.status(404).json({ error: 'User not found' });
@@ -1157,6 +1424,30 @@ app.patch('/api/admin/users/:id/verify', (req, res) => {
   });
 
   res.json(u);
+});
+
+app.delete('/api/admin/users/:id', (req, res) => {
+  const index = users.findIndex(user => user.id === req.params.id);
+  if (index === -1) return res.status(404).json({ error: 'User not found' });
+
+  const deletedUser = users[index];
+  users.splice(index, 1);
+
+  // Clean up listings to maintain references
+  gigs = gigs.filter(g => g.freelancerId !== req.params.id);
+  projects = projects.filter(p => p.buyerId !== req.params.id);
+
+  auditLogs.unshift({
+    id: 'log_' + Date.now(),
+    actor: 'Admin Chief',
+    role: 'super_admin',
+    action: 'USER_DELETED',
+    target: `User ${deletedUser.name}`,
+    details: `Permanently deleted user account ${deletedUser.email} and cleared their associated gigs & projects`,
+    timestamp: new Date().toLocaleString()
+  });
+
+  res.json({ success: true, id: deletedUser.id });
 });
 
 // Dispute Resolution Endpoint
