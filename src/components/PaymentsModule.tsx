@@ -1,118 +1,204 @@
 import React, { useState } from 'react';
-import { 
-  DollarSign, ArrowUpRight, ArrowDownLeft, Clock, 
-  CreditCard, Calendar, Filter, Download, MoreVertical, 
-  Search, ShieldCheck, AlertCircle
-} from 'lucide-react';
+import { ShieldCheck, FileText, Settings, Calculator, ChevronRight } from 'lucide-react';
 
-interface Transaction {
-  id: string;
-  date: string;
-  description: string;
-  type: 'earning' | 'withdrawal' | 'deposit';
-  amount: number;
-  status: 'completed' | 'pending' | 'failed';
-}
+export const PaymentsModule: React.FC<{ gigs: Gig[], orders: Order[], projects: Project[], proposals: Proposal[], currentUser: UserAccount }> = ({ gigs, orders, projects, proposals, currentUser }) => {
+  const [activeTab, setActiveTab] = useState<'money' | 'statements' | 'invoices' | 'transactions' | 'methods'>('money');
+  const [showAccountDetails, setShowAccountDetails] = useState(false);
+  const [showBuyerEscrowDetails, setShowBuyerEscrowDetails] = useState(false);
 
-const mockTransactions: Transaction[] = [
-  { id: '1', date: '2026-10-08', description: 'Payment for Gig: Full stack React App', type: 'earning', amount: 1500, status: 'completed' },
-  { id: '2', date: '2026-10-07', description: 'Withdrawal to Bank Account', type: 'withdrawal', amount: 500, status: 'completed' },
-  { id: '3', date: '2026-10-05', description: 'Payment for Gig: SEO Backlinks', type: 'earning', amount: 200, status: 'pending' },
-  { id: '4', date: '2026-10-01', description: 'Deposit via Credit Card', type: 'deposit', amount: 1000, status: 'completed' },
-];
+  const tabs = [
+    { id: 'money', label: 'My Money' },
+    { id: 'statements', label: 'Statements' },
+    { id: 'invoices', label: 'Invoices' },
+    { id: 'transactions', label: 'Transactions' },
+    { id: 'methods', label: 'Payment methods' },
+  ];
 
-export const PaymentsModule: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'all' | 'earnings' | 'withdrawals'>('all');
-
-  const filteredTransactions = activeTab === 'all' 
-    ? mockTransactions 
-    : mockTransactions.filter(t => t.type === (activeTab === 'earnings' ? 'earning' : 'withdrawal'));
+  const AccountCard = ({ title, desc, data, onClick }: { title: string, desc: string, data: any[], onClick?: () => void }) => (
+    <div 
+      className={`bg-white border border-slate-200 rounded-lg p-5 shadow-sm ${onClick ? 'cursor-pointer hover:border-blue-400 transition' : ''}`}
+      onClick={onClick}
+    >
+      <h3 className="text-lg font-bold text-slate-800">{title}</h3>
+      <p className="text-sm text-slate-500 mb-4">{desc}</p>
+      <table className="w-full text-sm">
+        <thead className="text-left text-slate-500 font-semibold border-b">
+          <tr>
+            <th className="pb-2">Currency</th>
+            <th className="pb-2 text-right">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((item, i) => (
+            <tr key={i} className="border-b last:border-0">
+              <td className="py-2 text-slate-600">{item.currency}</td>
+              <td className="py-2 text-right font-bold text-slate-900">{item.amount}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-900">Payments & Earnings</h2>
-        <div className="flex gap-2">
-          <button className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50">
-            <Filter size={18} /> Filter
-          </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-            <Download size={18} /> Export
-          </button>
-        </div>
-      </div>
+    <div className="max-w-7xl mx-auto p-6 bg-slate-100 min-h-screen">
+      <h1 className="text-4xl font-normal text-slate-800 mb-6">Payments</h1>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-          <p className="text-sm text-gray-500">Available Balance</p>
-          <p className="text-3xl font-bold mt-2">$2,450.00</p>
-          <button className="mt-4 text-blue-600 font-semibold">Withdraw Funds</button>
-        </div>
-        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-          <p className="text-sm text-gray-500">Pending Earnings</p>
-          <p className="text-3xl font-bold mt-2">$200.00</p>
-          <p className="text-sm text-gray-400 mt-1">From 1 active order</p>
-        </div>
-        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-          <p className="text-sm text-gray-500">Total Earned</p>
-          <p className="text-3xl font-bold mt-2">$48,500.00</p>
-          <p className="text-sm text-gray-400 mt-1">Lifetime earnings</p>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-        <div className="flex border-b border-gray-200">
-          <button 
-            className={`px-6 py-4 font-medium ${activeTab === 'all' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}
-            onClick={() => setActiveTab('all')}
-          >
-            All Transactions
-          </button>
-          <button 
-            className={`px-6 py-4 font-medium ${activeTab === 'earnings' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}
-            onClick={() => setActiveTab('earnings')}
-          >
-            Earnings
-          </button>
-          <button 
-            className={`px-6 py-4 font-medium ${activeTab === 'withdrawals' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}
-            onClick={() => setActiveTab('withdrawals')}
-          >
-            Withdrawals
-          </button>
-        </div>
-
-        <table className="w-full">
-          <thead className="bg-gray-50 text-left">
-            <tr>
-              <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase">Date</th>
-              <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase">Description</th>
-              <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase">Type</th>
-              <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase">Amount</th>
-              <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {filteredTransactions.map(txn => (
-              <tr key={txn.id}>
-                <td className="px-6 py-4 text-sm">{txn.date}</td>
-                <td className="px-6 py-4 text-sm font-medium">{txn.description}</td>
-                <td className="px-6 py-4 text-sm capitalize">{txn.type}</td>
-                <td className={`px-6 py-4 text-sm font-bold ${txn.type === 'earning' ? 'text-green-600' : 'text-gray-900'}`}>
-                  {txn.type === 'earning' ? '+' : '-'}${txn.amount.toFixed(2)}
-                </td>
-                <td className="px-6 py-4 text-sm">
-                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                    txn.status === 'completed' ? 'bg-green-100 text-green-800' :
-                    txn.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'
-                  }`}>
-                    {txn.status.toUpperCase()}
-                  </span>
-                </td>
-              </tr>
+      <div className="flex gap-8">
+        {/* Main Content */}
+        <div className="flex-1 space-y-6">
+          <div className="flex border-b border-slate-300">
+            {tabs.map(tab => (
+              <button 
+                key={tab.id}
+                className={`px-4 py-2 text-sm font-medium ${activeTab === tab.id ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-500 hover:text-slate-800'}`}
+                onClick={() => setActiveTab(tab.id as any)}
+              >
+                {tab.label}
+              </button>
             ))}
-          </tbody>
-        </table>
+          </div>
+
+          {activeTab === 'money' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <AccountCard 
+                  title="User Account" 
+                  desc="Available money" 
+                  data={[{currency: 'US dollar', amount: `$${currentUser.walletBalance.toLocaleString()}`}]}
+                  onClick={() => setShowAccountDetails(!showAccountDetails)}
+                />
+                <AccountCard 
+                  title="Buyer Escrow" 
+                  desc="Work others are doing for me" 
+                  data={[{currency: 'US dollar', amount: '$0.00'}]}
+                  onClick={() => setShowBuyerEscrowDetails(!showBuyerEscrowDetails)}
+                />
+                <AccountCard 
+                  title="Freelancer Escrow" 
+                  desc="Work I am doing for others" 
+                  data={[{currency: 'US dollar', amount: '$9.14'}]}
+                />
+              </div>
+              
+              {showAccountDetails && (
+                <div className="bg-white border border-slate-200 rounded-lg shadow-sm">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 text-slate-500 font-semibold border-b">
+                      <tr>
+                        <th className="p-4 text-left">Currency</th>
+                        <th className="p-4 text-left">Available</th>
+                        <th className="p-4 text-left">Available for withdraw</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td className="p-4 font-bold">USD</td>
+                        <td className="p-4">${currentUser.walletBalance.toLocaleString()}</td>
+                        <td className="p-4">${currentUser.walletBalance.toLocaleString()}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {showBuyerEscrowDetails && (
+                <div className="bg-white border border-slate-200 rounded-lg shadow-sm">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 text-slate-500 font-semibold border-b">
+                      <tr>
+                        <th className="p-4 text-left">Description</th>
+                        <th className="p-4 text-left">In Escrow</th>
+                        <th className="p-4 text-left">Deposit Requests</th>
+                        <th className="p-4 text-left">Invoices</th>
+                        <th className="p-4 text-left">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {orders
+                        .filter(o => o.buyerId === currentUser.id && ['funded_in_escrow', 'in_progress'].includes(o.status))
+                        .map((order) => {
+                          const associatedGig = gigs.find(g => g.id === order.gigId);
+                          const associatedProject = projects.find(p => p.id === order.projectId);
+                          
+                          return (
+                            <tr key={order.id}>
+                              <td className="p-4 text-blue-600">
+                                {order.title}
+                                <div className="text-xs text-slate-500">
+                                  {associatedGig ? `Gig: ${associatedGig.title}` : associatedProject ? `Project: ${associatedProject.title}` : 'General Order'}
+                                </div>
+                              </td>
+                              <td className="p-4">${order.amount.toFixed(2)}</td>
+                              <td className="p-4">-</td>
+                              <td className="p-4">✓ ${order.amount.toFixed(2)}</td>
+                              <td className="p-4 text-emerald-600 font-semibold">↑ Escrow Deposit</td>
+                            </tr>
+                          );
+                        })
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab !== 'money' && (
+            <div className="bg-white border border-slate-200 rounded-lg p-10 text-center text-slate-500">
+              <p>No {tabs.find(t => t.id === activeTab)?.label.toLowerCase()} found.</p>
+            </div>
+          )}
+        </div>
+
+        {/* Sidebar */}
+        <div className="w-80 space-y-6">
+          <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm">
+            <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+              <ShieldCheck size={16} /> CONTROL PANEL
+            </h2>
+            <div className="space-y-3 text-sm">
+              {[
+                { label: 'Paid this month', value: '$0.00' },
+                { label: 'Paid to date', value: '$814.20' },
+                { label: 'Earned this month', value: '$0.00' },
+                { label: 'Earned to date', value: '$169.9K' },
+              ].map(item => (
+                <div key={item.label} className="flex justify-between">
+                  <span className="text-slate-600">{item.label}</span>
+                  <span className="font-bold text-slate-900">{item.value}</span>
+                </div>
+              ))}
+              <div className="border-t pt-3 mt-3 space-y-3">
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Earned past two months</span>
+                  <span className="font-bold text-slate-900">$0.00</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Clearing period</span>
+                  <span className="font-bold text-slate-900">14 days</span>
+                </div>
+                <button className="text-sm text-blue-600 hover:underline">Learn more</button>
+              </div>
+            </div>
+
+            <div className="border-t pt-4 mt-4">
+              <h3 className="font-bold text-slate-800 mb-2">Service Fees*</h3>
+              <div className="text-sm space-y-1 text-slate-600">
+                <p>First $7,000 earned with a Buyer (excl. VAT) <span className="font-bold">7.5%</span></p>
+                <p>Over $7,000 earned with a Buyer <span className="font-bold">3.5%</span></p>
+                <p className="text-xs text-slate-400 mt-2">*Work billed under the Zero Commission scheme is excluded</p>
+              </div>
+            </div>
+
+            <div className="border-t pt-4 mt-4 space-y-3 text-sm text-slate-700">
+              <button className="flex items-center gap-2 hover:text-blue-600"><ShieldCheck size={16}/> Escrow Deposit</button>
+              <button className="flex items-center gap-2 hover:text-blue-600"><FileText size={16}/> Create Invoice</button>
+              <button className="flex items-center gap-2 hover:text-blue-600"><Settings size={16}/> Payment Settings</button>
+              <button className="flex items-center gap-2 hover:text-blue-600"><Calculator size={16}/> Earnings Calculator</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

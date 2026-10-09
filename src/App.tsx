@@ -532,6 +532,14 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
+  useEffect(() => {
+    if (path === '/payments') {
+      setAdminTab('payments');
+    } else if (path === '/gigs') {
+      setAdminTab('overview');
+    }
+  }, [path]);
+
   const navigate = (to: string, e?: React.MouseEvent) => {
     if (e) e.preventDefault();
     window.history.pushState({}, '', to);
@@ -588,7 +596,8 @@ export default function App() {
   useEffect(() => {
     const activeUserId = impersonatedUser ? impersonatedUser.id : currentUser.id;
     fetchUserEmails(activeUserId);
-  }, [impersonatedUser]);
+    fetchAllAdminData();
+  }, [impersonatedUser, currentUser]);
 
   const fetchAllAdminData = async () => {
     try {
@@ -634,6 +643,8 @@ export default function App() {
           setSelectedOrder(ords[0]);
           fetchMessages(ords[0].id);
         }
+      } else {
+        setOrders([]);
       }
       if (disputesData.length > 0) setDisputes(disputesData);
       if (refundsData.length > 0) setRefunds(refundsData);
@@ -1491,7 +1502,7 @@ export default function App() {
   };
 
   // Reserved top-level route segments
-  const reservedRoutes = ['gigs', 'projects', 'categories', 'orders', 'messages', 'create-gig', 'post-project', 'admin', 'profile'];
+  const reservedRoutes = ['gigs', 'projects', 'categories', 'orders', 'messages', 'create-gig', 'post-project', 'admin', 'profile', 'payments'];
 
   // Route matching
   const pathParts = path.split('/').filter(Boolean);
@@ -1505,6 +1516,7 @@ export default function App() {
   const isMessages = path === '/messages';
   const isCreateGig = path === '/create-gig';
   const isPostProject = path === '/post-project';
+  const isPayments = path.startsWith('/payments');
   const isAdmin = path === '/admin';
 
   // Gig detail route check: Fiverr style /:username/:slug OR /gigs/:id
@@ -4665,7 +4677,7 @@ export default function App() {
                     <span>Freelancer Activity</span>
                   </button>
                   <button 
-                    onClick={(e) => { navigate('/payments', e); setIsUserDropdownOpen(false); }}
+                    onClick={(e) => { navigate('/payments/myMoney?ref=topmenu_loggedin', e); setIsUserDropdownOpen(false); }}
                     className="w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium transition"
                   >
                     <CreditCard className="w-4 h-4 text-emerald-600" />
@@ -6581,6 +6593,12 @@ export default function App() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {isPayments && (
+        <div className="max-w-7xl mx-auto px-4 py-8">
+          <PaymentsModule gigs={gigs} orders={orders} projects={projects} proposals={proposals} currentUser={impersonatedUser || currentUser} />
         </div>
       )}
 
