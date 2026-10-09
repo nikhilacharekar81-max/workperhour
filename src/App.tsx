@@ -5,8 +5,10 @@ import {
   Sparkles, Award, ArrowRight, ChevronRight, Filter, Globe, Lock, Check, RefreshCw, ArrowLeft,
   Settings, Users, Layers, TrendingUp, AlertTriangle, Eye, Trash2, CheckCircle, BarChart3,
   LayoutDashboard, ShieldAlert, Sliders, LogOut, FileText, Activity, Wallet, Scale, CornerDownLeft,
-  HelpCircle, Flag, MessageCircle, FileCode, KeyRound, Shield
+  HelpCircle, Flag, MessageCircle, FileCode, KeyRound, Shield, ExternalLink
 } from 'lucide-react';
+import { UserWalletsLedgerModule } from './components/UserWalletsLedgerModule';
+import { AdminOrdersManager } from './components/AdminOrdersManager';
 
 interface GigExtra {
   id: string;
@@ -44,6 +46,7 @@ interface Project {
   buyerName: string;
   buyerAvatar: string;
   title: string;
+  slug?: string;
   category: string;
   subcategory?: string;
   description: string;
@@ -78,13 +81,23 @@ interface Order {
   buyerId: string;
   sellerId: string;
   amount: number;
-  status: 'funded_in_escrow' | 'in_progress' | 'delivered' | 'completed' | 'disputed';
+  status: 'funded_in_escrow' | 'in_progress' | 'delivered' | 'completed' | 'disputed' | 'revision' | 'cancelled';
   createdAt: string;
   dueDate: string;
   requirements?: string;
   deliverables?: string;
+  deliverableFiles?: Array<{ id: string; name: string; url: string; size: string; uploadedAt: string }>;
+  revisions?: Array<{ id: string; requestedAt: string; reason: string; status: string }>;
+  adminNotes?: string;
+  isMuted?: boolean;
   escrowProtectionStartDate?: string;
   escrowProtectionEndDate?: string;
+  gigId?: string;
+  projectId?: string;
+  serviceUrl?: string;
+  gigSlug?: string;
+  sellerUsername?: string;
+  serviceTitle?: string;
 }
 
 interface UserAccount {
@@ -134,7 +147,7 @@ interface Payout {
   freelancerId: string;
   amount: number;
   method: string;
-  status: 'pending' | 'processed' | 'failed';
+  status: 'pending' | 'approved' | 'processed' | 'failed' | 'cancelled' | 'reversed';
   createdAt: string;
   accountDetails: string;
 }
@@ -296,7 +309,7 @@ export default function App() {
     'overview' | 'users' | 'projects' | 'gigs' | 'categories' | 
     'proposals' | 'contracts' | 'payments' | 'wallet' | 'escrow' | 
     'disputes' | 'refunds' | 'payouts' | 'reviews' | 'messages' | 
-    'reports' | 'support' | 'cms' | 'settings' | 'security' | 'activity'
+    'reports' | 'support' | 'cms' | 'settings' | 'security' | 'activity' | 'orders'
   >('overview');
 
   const [platformFee, setPlatformFee] = useState<number>(10);
@@ -413,6 +426,16 @@ export default function App() {
     status: 'pending' as Proposal['status']
   });
 
+  // Admin Orders Management State
+  const [orderSearchQuery, setOrderSearchQuery] = useState('');
+  const [orderStatusFilter, setOrderStatusFilter] = useState<'all' | 'funded_in_escrow' | 'in_progress' | 'delivered' | 'completed' | 'disputed'>('all');
+  const [orderGigFilter, setOrderGigFilter] = useState('all');
+  const [orderProjectFilter, setOrderProjectFilter] = useState('all');
+  const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
+  const [associatingOrder, setAssociatingOrder] = useState<Order | null>(null);
+  const [linkTargetType, setLinkTargetType] = useState<'gig' | 'project'>('gig');
+  const [linkTargetId, setLinkTargetId] = useState('');
+
   // Gig Extras state
   const [selectedExtras, setSelectedExtras] = useState<string[]>([]);
   const [newGigExtras, setNewGigExtras] = useState<{ id: string; title: string; price: number }[]>([
@@ -452,6 +475,12 @@ export default function App() {
     const uname = (gig.freelancerUsername || slugify(gig.freelancerName)).toLowerCase();
     const gslug = (gig.slug || slugify(gig.title)).toLowerCase();
     return `/${uname}/${gslug}`;
+  };
+
+  // Get clean URL for a project: /project/:slug
+  const getProjectUrl = (project: Project) => {
+    const pslug = (project.slug || slugify(project.title)).toLowerCase();
+    return `/project/${pslug}`;
   };
 
   // Sync pathname route
@@ -1219,6 +1248,37 @@ export default function App() {
     }
   };
 
+  const handleApprovePayout = async (payoutId: string) => {
+    try {
+      const res = await fetch(`/api/admin/payouts/${payoutId}/approve`, { method: 'PATCH' });
+      const updated = await res.json();
+      setPayouts(prev => prev.map(p => p.id === payoutId ? updated : p));
+      fetchAllAdminData();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+  const handleProcessPayout = async (payoutId: string) => {
+    try {
+      const res = await fetch(`/api/admin/payouts/${payoutId}/process`, { method: 'PATCH' });
+      const updated = await res.json();
+      setPayouts(prev => prev.map(p => p.id === payoutId ? updated : p));
+      fetchAllAdminData();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+  const handleFailPayout = async (payoutId: string) => {
+    try {
+      const res = await fetch(`/api/admin/payouts/${payoutId}/fail`, { method: 'PATCH' });
+      const updated = await res.json();
+      setPayouts(prev => prev.map(p => p.id === payoutId ? updated : p));
+      fetchAllAdminData();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleCreateOrder = async (title: string, amount: number, sellerId: string) => {
     try {
       const res = await fetch('/api/orders', {
@@ -1483,22 +1543,23 @@ export default function App() {
                 { id: 'users', label: '2. User Management', icon: Users },
                 { id: 'projects', label: '3. Projects & RFPs', icon: Briefcase },
                 { id: 'gigs', label: '4. Services & Gigs', icon: Layers },
-                { id: 'categories', label: '5. Categories & Slugs', icon: Sliders },
-                { id: 'proposals', label: '6. Proposals & Bids', icon: FileText },
-                { id: 'contracts', label: '7. Contracts & Milestones', icon: CheckCircle2 },
-                { id: 'payments', label: '8. Payment Gateways', icon: DollarSign },
-                { id: 'wallet', label: '9. Wallet & Double Ledger', icon: Wallet },
-                { id: 'escrow', label: '10. Escrow Vault (14-Day)', icon: ShieldCheck },
-                { id: 'disputes', label: '11. Dispute Resolution', icon: Scale },
-                { id: 'refunds', label: '12. Refund Requests', icon: CornerDownLeft },
-                { id: 'payouts', label: '13. Freelancer Payouts', icon: TrendingUp },
-                { id: 'reviews', label: '14. Reviews & Moderation', icon: Star },
-                { id: 'messages', label: '15. Messages & Chat Audit', icon: MessageCircle },
-                { id: 'reports', label: '16. Flagged Reports', icon: Flag },
-                { id: 'support', label: '17. Support Ticket Desk', icon: HelpCircle },
-                { id: 'cms', label: '18. CMS & Legal Policies', icon: FileCode },
-                { id: 'settings', label: '19. Site & Fee Settings', icon: Settings },
-                { id: 'activity', label: '20. Activity & Audit Trail', icon: Activity }
+                { id: 'orders', label: '5. All Orders', icon: Shield },
+                { id: 'categories', label: '6. Categories & Slugs', icon: Sliders },
+                { id: 'proposals', label: '7. Proposals & Bids', icon: FileText },
+                { id: 'contracts', label: '8. Contracts & Milestones', icon: CheckCircle2 },
+                { id: 'payments', label: '9. Payment Gateways', icon: DollarSign },
+                { id: 'wallet', label: '10. Wallet & Double Ledger', icon: Wallet },
+                { id: 'escrow', label: '11. Escrow Vault (14-Day)', icon: ShieldCheck },
+                { id: 'disputes', label: '12. Dispute Resolution', icon: Scale },
+                { id: 'refunds', label: '13. Refund Requests', icon: CornerDownLeft },
+                { id: 'payouts', label: '14. Freelancer Payouts', icon: TrendingUp },
+                { id: 'reviews', label: '15. Reviews & Moderation', icon: Star },
+                { id: 'messages', label: '16. Messages & Chat Audit', icon: MessageCircle },
+                { id: 'reports', label: '17. Flagged Reports', icon: Flag },
+                { id: 'support', label: '18. Support Ticket Desk', icon: HelpCircle },
+                { id: 'cms', label: '19. CMS & Legal Policies', icon: FileCode },
+                { id: 'settings', label: '20. Site & Fee Settings', icon: Settings },
+                { id: 'activity', label: '21. Activity & Audit Trail', icon: Activity }
               ].map(item => {
                 const IconComp = item.icon;
                 const isActive = adminTab === item.id;
@@ -1548,22 +1609,23 @@ export default function App() {
                 {adminTab === 'users' && '2. User Management & Impersonation'}
                 {adminTab === 'projects' && '3. Projects & RFP Moderation'}
                 {adminTab === 'gigs' && '4. Services & Gigs Management'}
-                {adminTab === 'categories' && '5. Categories, Subcategories & Slugs'}
-                {adminTab === 'proposals' && '6. Proposals & Bid Audit'}
-                {adminTab === 'contracts' && '7. Contracts & Milestone Timelines'}
-                {adminTab === 'payments' && '8. Payments & Razorpay/Stripe Logs'}
-                {adminTab === 'wallet' && '9. User Wallets & Double-Entry Ledger'}
-                {adminTab === 'escrow' && '10. Escrow Management (Mandatory 14-Day Protection)'}
-                {adminTab === 'disputes' && '11. Dispute Investigation & Resolution'}
-                {adminTab === 'refunds' && '12. Refund Requests & Approvals'}
-                {adminTab === 'payouts' && '13. Freelancer Payouts & Disbursements'}
-                {adminTab === 'reviews' && '14. Reviews & Ratings Moderation'}
-                {adminTab === 'messages' && '15. Messages & Conversation Audit'}
-                {adminTab === 'reports' && '16. Flagged Reports & Cases'}
-                {adminTab === 'support' && '17. Support Ticket Help Desk'}
-                {adminTab === 'cms' && '18. CMS Pages & Legal Policies'}
-                {adminTab === 'settings' && '19. Site & Fee Settings'}
-                {(adminTab === 'security' || adminTab === 'activity') && '20. Admin Activity Logs & Security Audit Trail'}
+                {adminTab === 'orders' && '5. All Orders Management'}
+                {adminTab === 'categories' && '6. Categories, Subcategories & Slugs'}
+                {adminTab === 'proposals' && '7. Proposals & Bid Audit'}
+                {adminTab === 'contracts' && '8. Contracts & Milestone Timelines'}
+                {adminTab === 'payments' && '9. Payments & Razorpay/Stripe Logs'}
+                {adminTab === 'wallet' && '10. User Wallets & Double-Entry Ledger'}
+                {adminTab === 'escrow' && '11. Escrow Management (Mandatory 14-Day Protection)'}
+                {adminTab === 'disputes' && '12. Dispute Investigation & Resolution'}
+                {adminTab === 'refunds' && '13. Refund Requests & Approvals'}
+                {adminTab === 'payouts' && '14. Freelancer Payouts & Disbursements'}
+                {adminTab === 'reviews' && '15. Reviews & Ratings Moderation'}
+                {adminTab === 'messages' && '16. Messages & Conversation Audit'}
+                {adminTab === 'reports' && '17. Flagged Reports & Cases'}
+                {adminTab === 'support' && '18. Support Ticket Help Desk'}
+                {adminTab === 'cms' && '19. CMS Pages & Legal Policies'}
+                {adminTab === 'settings' && '20. Site & Fee Settings'}
+                {(adminTab === 'security' || adminTab === 'activity') && '21. Admin Activity Logs & Security Audit Trail'}
               </h1>
             </div>
 
@@ -3594,6 +3656,18 @@ export default function App() {
             </div>
           )}
 
+          {/* MODULE 5: ALL ORDERS MANAGEMENT */}
+          {adminTab === 'orders' && (
+            <AdminOrdersManager
+              orders={orders as any}
+              users={usersList as any}
+              gigs={gigs}
+              currentUser={currentUser}
+              onRefreshOrders={fetchAllAdminData}
+              getGigUrl={getGigUrl}
+            />
+          )}
+
           {/* MODULE 6: PROPOSALS & BIDS MANAGEMENT */}
           {adminTab === 'proposals' && (
             <div className="space-y-6">
@@ -3963,7 +4037,12 @@ export default function App() {
             </div>
           )}
 
-          {/* MODULE 10: ESCROW MANAGEMENT (MANDATORY 14-DAY PROTECTION) */}
+          {/* MODULE 10: USER WALLETS & DOUBLE-ENTRY LEDGER */}
+          {adminTab === 'wallet' && (
+            <UserWalletsLedgerModule currentUser={currentUser} />
+          )}
+
+          {/* MODULE 11: ESCROW MANAGEMENT (MANDATORY 14-DAY PROTECTION) */}
           {adminTab === 'escrow' && (
             <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-4">
               <div className="flex items-center justify-between mb-4">
@@ -3980,7 +4059,23 @@ export default function App() {
                 <div key={ord.id} className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
-                      <span className="text-xs font-bold text-white block">{ord.title}</span>
+                      {(() => {
+                        const targetUrl = ord.serviceUrl || (ord.gigId && gigs.find(g => g.id === ord.gigId) ? getGigUrl(gigs.find(g => g.id === ord.gigId)!) : (ord.id === 'ord_bk' ? '/broadcastking/create-an-amazing-promotional-explainer-video-a-puppet' : ord.id === 'ord_bushra' ? '/bushra/i-will-increase-ahrefs-domain-rating-dr-70-using-high-authority-seo-backlinks' : '/elena_rostova/i-will-build-a-high-performance-full-stack-web-app-in-react-and-node'));
+                        return (
+                          <div className="flex items-center gap-1.5">
+                            <a
+                              href={targetUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs font-bold text-white hover:text-emerald-400 transition-colors inline-flex items-center gap-1 group"
+                              title={`View "${ord.title}" in new tab`}
+                            >
+                              <span className="group-hover:underline">{ord.title}</span>
+                              <ExternalLink className="w-3 h-3 text-emerald-400 shrink-0" />
+                            </a>
+                          </div>
+                        );
+                      })()}
                       <span className="text-[11px] text-slate-400">Buyer ID: {ord.buyerId} · Seller ID: {ord.sellerId}</span>
                     </div>
                     <span className="text-base font-extrabold text-emerald-400">${ord.amount}</span>
@@ -4010,6 +4105,48 @@ export default function App() {
             </div>
           )}
 
+          {/* MODULE 7: PAYOUT MANAGEMENT */}
+          {adminTab === 'payouts' && (
+            <div className="space-y-6">
+              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6">
+                <h3 className="text-lg font-bold text-white mb-2">Payout Management</h3>
+                <p className="text-xs text-slate-400">Manage freelancer payouts, statuses, and prevent duplicates.</p>
+              </div>
+              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="text-slate-400 text-xs uppercase font-bold">
+                      <th className="p-3">Freelancer ID</th>
+                      <th className="p-3">Amount</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800 text-xs text-slate-300">
+                    {payouts.map(p => (
+                      <tr key={p.id}>
+                        <td className="p-3">{p.freelancerId}</td>
+                        <td className="p-3">${p.amount}</td>
+                        <td className="p-3 capitalize">{p.status}</td>
+                        <td className="p-3 text-right space-x-2">
+                          {p.status === 'pending' && (
+                            <>
+                              <button onClick={() => handleApprovePayout(p.id)} className="text-emerald-400 font-bold hover:text-emerald-300">Approve</button>
+                              <button onClick={() => handleFailPayout(p.id)} className="text-red-400 font-bold hover:text-red-300">Fail</button>
+                            </>
+                          )}
+                          {p.status === 'approved' && (
+                            <button onClick={() => handleProcessPayout(p.id)} className="text-blue-400 font-bold hover:text-blue-300">Process</button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* MODULE 11: DISPUTE MANAGEMENT */}
           {adminTab === 'disputes' && (
             <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-4">
@@ -4017,7 +4154,7 @@ export default function App() {
               {disputes.map(disp => (
                 <div key={disp.id} className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white">Dispute #{disp.id} on Order #{disp.orderId}</span>
+                    <span className="text-xs font-bold text-white">Dispute #{disp.id} on Order #{disp.orderId}: {orders.find(o => o.id === disp.orderId)?.title || 'Unknown Order'}</span>
                     <span className="text-xs font-bold uppercase text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded">
                       {disp.status.replace(/_/g, ' ')}
                     </span>

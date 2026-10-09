@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+import { financeLedger } from './src/server/financeLedger.js';
 
 dotenv.config();
 
@@ -84,6 +85,7 @@ interface Project {
   buyerName: string;
   buyerAvatar: string;
   title: string;
+  slug?: string;
   category: string;
   subcategory?: string;
   description: string;
@@ -118,13 +120,23 @@ interface Order {
   buyerId: string;
   sellerId: string;
   amount: number;
-  status: 'funded_in_escrow' | 'in_progress' | 'delivered' | 'completed' | 'disputed';
+  status: 'funded_in_escrow' | 'in_progress' | 'delivered' | 'completed' | 'disputed' | 'revision' | 'cancelled';
   createdAt: string;
   dueDate: string;
   requirements?: string;
   deliverables?: string;
+  deliverableFiles?: Array<{ id: string; name: string; url: string; size: string; uploadedAt: string }>;
+  revisions?: Array<{ id: string; requestedAt: string; reason: string; status: string }>;
+  adminNotes?: string;
+  isMuted?: boolean;
   escrowProtectionStartDate?: string;
   escrowProtectionEndDate?: string;
+  gigId?: string;
+  projectId?: string;
+  serviceUrl?: string;
+  gigSlug?: string;
+  sellerUsername?: string;
+  serviceTitle?: string;
 }
 
 interface Dispute {
@@ -153,8 +165,8 @@ interface Payout {
   id: string;
   freelancerId: string;
   amount: number;
-  method: 'UPI' | 'Bank Transfer' | 'Stripe' | 'Razorpay';
-  status: 'pending' | 'processed' | 'failed';
+  method: 'UPI' | 'Bank Transfer' | 'Stripe' | 'Razorpay' | 'PayPal';
+  status: 'pending' | 'approved' | 'processed' | 'failed' | 'cancelled' | 'reversed';
   createdAt: string;
   accountDetails: string;
 }
@@ -495,42 +507,104 @@ let proposals: Proposal[] = [
 let orders: Order[] = [
   {
     id: 'ord_1',
-    title: 'Full-Stack SaaS MVP Development',
+    title: 'I will build a high performance full stack web app in react and node',
     buyerId: 'user_2',
     sellerId: 'user_1',
+    gigId: 'gig_3',
+    sellerUsername: 'elena_rostova',
+    gigSlug: 'i-will-build-a-high-performance-full-stack-web-app-in-react-and-node',
+    serviceUrl: '/elena_rostova/i-will-build-a-high-performance-full-stack-web-app-in-react-and-node',
+    serviceTitle: 'I will build a high performance full stack web app in react and node',
     amount: 950,
-    status: 'funded_in_escrow',
+    status: 'disputed',
     createdAt: '2026-10-05',
     dueDate: '2026-10-19',
-    requirements: 'Build user dashboard with dark mode and PostgreSQL.',
+    requirements: 'Build user dashboard with dark mode, full-stack MVP, and PostgreSQL database integration.',
+    deliverables: 'Source code repository with React 19 frontend and Node.js REST API.',
+    deliverableFiles: [
+      { id: 'deliv_1', name: 'saas_mvp_build_v1.zip', size: '14.8 MB', url: '#', uploadedAt: '2026-10-07 11:20 AM' },
+      { id: 'deliv_2', name: 'api_documentation.pdf', size: '1.2 MB', url: '#', uploadedAt: '2026-10-07 11:22 AM' }
+    ],
+    revisions: [
+      { id: 'rev_1', requestedAt: '2026-10-07 01:15 PM', reason: 'Missing dark mode toggle in navigation bar and settings.', status: 'open' }
+    ],
+    adminNotes: 'Buyer filed formal dispute regarding dark theme. Elena states toggle was ready in PR #4. Under review.',
+    isMuted: false,
     escrowProtectionStartDate: '2026-10-05',
     escrowProtectionEndDate: '2026-10-19'
   },
   {
     id: 'ord_bk',
-    title: 'Promotional Explainer Video Puppet',
+    title: 'Create an amazing promotional explainer video a puppet',
     buyerId: 'user_2',
     sellerId: 'user_bk',
+    gigId: 'gig_0',
+    sellerUsername: 'broadcastking',
+    gigSlug: 'create-an-amazing-promotional-explainer-video-a-puppet',
+    serviceUrl: '/broadcastking/create-an-amazing-promotional-explainer-video-a-puppet',
+    serviceTitle: 'Create an amazing promotional explainer video a puppet',
     amount: 450,
     status: 'in_progress',
     createdAt: '2026-10-06',
     dueDate: '2026-10-12',
-    requirements: '30-second puppet animation for mobile app launch.',
+    requirements: '30-second puppet animation for mobile app launch. Professional voiceover and commercial rights included.',
+    deliverables: 'Full 1080p MP4 master video + raw audio WAV file.',
+    deliverableFiles: [
+      { id: 'deliv_3', name: 'puppet_rigging_preview.mp4', size: '8.4 MB', url: '#', uploadedAt: '2026-10-08 02:40 PM' }
+    ],
+    adminNotes: 'Puppet character model approved by Marcus. Final render underway.',
+    isMuted: false,
     escrowProtectionStartDate: '2026-10-06',
     escrowProtectionEndDate: '2026-10-20'
   },
   {
     id: 'ord_bushra',
-    title: 'Ahrefs DR 70 SEO Backlinks Campaign',
+    title: 'I will increase ahrefs domain rating dr 70 using high authority SEO backlinks',
     buyerId: 'user_2',
     sellerId: 'user_3',
+    gigId: 'gig_2',
+    sellerUsername: 'bushra',
+    gigSlug: 'i-will-increase-ahrefs-domain-rating-dr-70-using-high-authority-seo-backlinks',
+    serviceUrl: '/bushra/i-will-increase-ahrefs-domain-rating-dr-70-using-high-authority-seo-backlinks',
+    serviceTitle: 'I will increase ahrefs domain rating dr 70 using high authority SEO backlinks',
     amount: 350,
-    status: 'in_progress',
+    status: 'delivered',
     createdAt: '2026-10-07',
     dueDate: '2026-10-14',
-    requirements: 'Target domain ranking boost for SaaS landing page.',
+    requirements: 'Target domain ranking boost for SaaS landing page with 25 contextual backlinks.',
+    deliverables: 'Comprehensive Ahrefs DR 70 indexing report and verified live URLs.',
+    deliverableFiles: [
+      { id: 'deliv_4', name: 'ahrefs_dr70_verified_backlinks.pdf', size: '2.4 MB', url: '#', uploadedAt: '2026-10-08 04:30 PM' },
+      { id: 'deliv_5', name: 'anchor_text_analysis.xlsx', size: '540 KB', url: '#', uploadedAt: '2026-10-08 04:32 PM' }
+    ],
+    adminNotes: 'Work delivered on time. 3-day buyer review timer active before auto-completion.',
+    isMuted: false,
     escrowProtectionStartDate: '2026-10-07',
     escrowProtectionEndDate: '2026-10-21'
+  },
+  {
+    id: 'ord_comp_1',
+    title: 'I will seo backlinks high da authority link building service for google ranking',
+    buyerId: 'user_2',
+    sellerId: 'user_1',
+    gigId: 'gig_1',
+    sellerUsername: 'jacob_m',
+    gigSlug: 'i-will-seo-backlinks-high-da-authority-link-building-service-for-google-ranking',
+    serviceUrl: '/jacob_m/i-will-seo-backlinks-high-da-authority-link-building-service-for-google-ranking',
+    serviceTitle: 'I will seo backlinks high da authority link building service for google ranking',
+    amount: 450,
+    status: 'completed',
+    createdAt: '2026-09-25',
+    dueDate: '2026-10-02',
+    requirements: 'Contextual backlinks on DA 70+ technology blogs.',
+    deliverables: 'PDF verification report and high-ranking backlinks.',
+    deliverableFiles: [
+      { id: 'deliv_6', name: 'final_seo_delivery_da70.pdf', size: '3.1 MB', url: '#', uploadedAt: '2026-10-01 10:00 AM' }
+    ],
+    adminNotes: 'Successfully completed. Buyer left 5-star positive review.',
+    isMuted: false,
+    escrowProtectionStartDate: '2026-09-25',
+    escrowProtectionEndDate: '2026-10-09'
   }
 ];
 
@@ -709,16 +783,741 @@ let messages: Message[] = [
   }
 ];
 
+function enrichOrderWithServiceInfo(o: Order) {
+  const gig = (o.gigId ? gigs.find(g => g.id === o.gigId) : undefined) ||
+              gigs.find(g => g.freelancerId === o.sellerId) ||
+              gigs.find(g => g.title.toLowerCase() === o.title.toLowerCase());
+  const project = (o.projectId ? projects.find(p => p.id === o.projectId) : undefined) ||
+                  projects.find(p => p.title.toLowerCase() === o.title.toLowerCase());
+  const seller = users.find(u => u.id === o.sellerId);
+  const sellerUsername = o.sellerUsername || gig?.freelancerUsername || (seller?.name || '').toLowerCase().replace(/\s+/g, '_');
+  const gigSlug = o.gigSlug || gig?.slug;
+  const serviceUrl = o.serviceUrl || (gig && gigSlug ? `/${sellerUsername}/${gigSlug}` : project ? `/project/${project.slug}` : undefined);
+  const serviceTitle = gig?.title || project?.title || o.serviceTitle || o.title;
+
+  return {
+    ...o,
+    gigId: o.gigId || gig?.id,
+    projectId: o.projectId || project?.id,
+    sellerUsername,
+    gigSlug,
+    serviceUrl,
+    serviceTitle
+  };
+}
+
 // REST API Endpoints
 app.get('/api/users', (req, res) => res.json(users));
 app.get('/api/gigs', (req, res) => res.json(gigs));
 app.get('/api/projects', (req, res) => res.json(projects));
 app.get('/api/proposals', (req, res) => res.json(proposals));
-app.get('/api/orders', (req, res) => res.json(orders));
+app.get('/api/orders', (req, res) => {
+  const enriched = orders.map(enrichOrderWithServiceInfo);
+  res.json(enriched);
+});
+
+// Single Order Workspace Detail
+app.get('/api/orders/:id', (req, res) => {
+  const order = orders.find(o => o.id === req.params.id);
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  const enriched = enrichOrderWithServiceInfo(order);
+  const buyer = users.find(u => u.id === order.buyerId);
+  const seller = users.find(u => u.id === order.sellerId);
+  const orderMessages = messages.filter(m => m.orderId === order.id);
+  const dispute = disputes.find(d => d.orderId === order.id);
+
+  res.json({
+    ...enriched,
+    buyer,
+    seller,
+    messages: orderMessages,
+    dispute
+  });
+});
+
+// Extend Order Deadline
+app.patch('/api/orders/:id/extend-time', (req, res) => {
+  const order = orders.find(o => o.id === req.params.id);
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+
+  const { days, newDueDate, reason } = req.body;
+  const oldDate = order.dueDate;
+  let targetDate = newDueDate;
+
+  if (days && Number(days) > 0) {
+    const current = new Date(order.dueDate || Date.now());
+    current.setDate(current.getDate() + Number(days));
+    targetDate = current.toISOString().split('T')[0];
+  } else if (!targetDate) {
+    targetDate = new Date(Date.now() + 2 * 86400000).toISOString().split('T')[0];
+  }
+
+  order.dueDate = targetDate;
+
+  // Add system event message in chat
+  const sysMsg: Message = {
+    id: 'msg_' + Date.now(),
+    orderId: order.id,
+    senderId: 'system',
+    senderName: 'System / Admin Notice',
+    text: `⏱️ Deadline extended from ${oldDate} to ${order.dueDate}. ${reason ? 'Reason: ' + reason : 'Admin approved time extension.'}`,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  };
+  messages.push(sysMsg);
+
+  auditLogs.unshift({
+    id: 'log_' + Date.now(),
+    actor: 'Admin Chief',
+    role: 'super_admin',
+    action: 'ORDER_DEADLINE_EXTENDED',
+    target: `Order #${order.id}`,
+    details: `Extended deadline to ${order.dueDate} (${days || 'custom'} days). ${reason || ''}`,
+    timestamp: new Date().toLocaleString()
+  });
+
+  res.json({ success: true, order: enrichOrderWithServiceInfo(order), message: sysMsg });
+});
+
+// Save Admin Private Notes
+app.post('/api/orders/:id/admin-notes', (req, res) => {
+  const order = orders.find(o => o.id === req.params.id);
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+
+  order.adminNotes = req.body.notes || '';
+  res.json({ success: true, adminNotes: order.adminNotes });
+});
+
+// Upload Deliverable Override / File
+app.post('/api/orders/:id/deliverable', (req, res) => {
+  const order = orders.find(o => o.id === req.params.id);
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+
+  if (!order.deliverableFiles) order.deliverableFiles = [];
+  const newFile = {
+    id: 'deliv_' + Date.now(),
+    name: req.body.name || 'deliverable_final.zip',
+    size: req.body.size || '3.5 MB',
+    url: req.body.url || '#',
+    uploadedAt: new Date().toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
+  };
+
+  order.deliverableFiles.push(newFile);
+  if (order.status !== 'completed' && order.status !== 'disputed') {
+    order.status = 'delivered';
+  }
+
+  const sysMsg: Message = {
+    id: 'msg_' + Date.now(),
+    orderId: order.id,
+    senderId: 'system',
+    senderName: 'WorkSphere Deliveries',
+    text: `📦 Deliverable submitted: "${newFile.name}" (${newFile.size}). Buyer review window initiated.`,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  };
+  messages.push(sysMsg);
+
+  res.json({ success: true, file: newFile, order: enrichOrderWithServiceInfo(order) });
+});
+
+// Toggle Chat Mute
+app.patch('/api/orders/:id/mute', (req, res) => {
+  const order = orders.find(o => o.id === req.params.id);
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+
+  order.isMuted = !order.isMuted;
+  const sysMsg: Message = {
+    id: 'msg_' + Date.now(),
+    orderId: order.id,
+    senderId: 'system',
+    senderName: 'Administration Alert',
+    text: order.isMuted 
+      ? `🔒 Chat paused by Administrator during case review. Neither party may send messages.`
+      : `🔓 Chat unlocked by Administrator. Standard messaging resumed.`,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  };
+  messages.push(sysMsg);
+
+  res.json({ success: true, isMuted: order.isMuted });
+});
+
+// Force Complete & Release Funds
+app.post('/api/orders/:id/force-complete', (req, res) => {
+  const order = orders.find(o => o.id === req.params.id);
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+
+  // Resolve any active dispute
+  const dispute = disputes.find(d => d.orderId === order.id && (d.status === 'open' || d.status === 'under_investigation'));
+  if (dispute) {
+    dispute.status = 'resolved_release';
+    dispute.resolutionNotes = req.body.reason || 'Admin administrative force-release in seller favor.';
+  }
+
+  const result = financeLedger.releaseEscrow({
+    orderId: order.id,
+    orderTitle: order.title,
+    amount: order.amount,
+    sellerId: order.sellerId,
+    buyerId: order.buyerId,
+    actor: req.body.actor || 'Super Admin'
+  });
+
+  order.status = 'completed';
+
+  const seller = users.find(u => u.id === order.sellerId);
+  if (seller) {
+    seller.walletBalance = (seller.walletBalance || 0) + result.freelancerNet;
+  }
+
+  const sysMsg: Message = {
+    id: 'msg_' + Date.now(),
+    orderId: order.id,
+    senderId: 'system',
+    senderName: 'WorkSphere Escrow Vault',
+    text: `✅ Order Approved & Completed by Administration! Escrow funds released to freelancer wallet. Net Payout: $${result.freelancerNet}.`,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  };
+  messages.push(sysMsg);
+
+  res.json({ success: true, order: enrichOrderWithServiceInfo(order), result });
+});
+
+// Force Cancel & Refund Buyer
+app.post('/api/orders/:id/force-cancel', (req, res) => {
+  const order = orders.find(o => o.id === req.params.id);
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+
+  const isPartial = req.body.refundType === 'partial';
+  const refundAmount = isPartial && Number(req.body.customAmount) > 0 ? Number(req.body.customAmount) : order.amount;
+
+  const dispute = disputes.find(d => d.orderId === order.id && (d.status === 'open' || d.status === 'under_investigation'));
+  if (dispute) {
+    dispute.status = isPartial ? 'resolved_partial' : 'resolved_refund';
+    dispute.resolutionNotes = req.body.reason || 'Admin administrative cancellation and refund.';
+  }
+
+  const result = financeLedger.refundEscrow({
+    orderId: order.id,
+    orderTitle: order.title,
+    amount: refundAmount,
+    buyerId: order.buyerId,
+    reason: req.body.reason || 'Admin cancelled order and refunded buyer wallet',
+    actor: req.body.actor || 'Super Admin'
+  });
+
+  order.status = 'cancelled';
+
+  const buyer = users.find(u => u.id === order.buyerId);
+  if (buyer) {
+    buyer.walletBalance = (buyer.walletBalance || 0) + refundAmount;
+  }
+
+  const sysMsg: Message = {
+    id: 'msg_' + Date.now(),
+    orderId: order.id,
+    senderId: 'system',
+    senderName: 'WorkSphere Escrow Vault',
+    text: `🚨 Order Cancelled & Refunded by Administration. $${refundAmount} credited back to buyer wallet balance. Reason: ${req.body.reason || 'Administrative cancellation.'}`,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  };
+  messages.push(sysMsg);
+
+  res.json({ success: true, order: enrichOrderWithServiceInfo(order), result });
+});
+
+// Send Chat Message into Order Workstream
+app.post('/api/orders/:id/message', (req, res) => {
+  const order = orders.find(o => o.id === req.params.id);
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+
+  if (order.isMuted && req.body.senderRole !== 'admin') {
+    return res.status(403).json({ error: 'Chat is currently muted by Administrator.' });
+  }
+
+  const newMsg: Message = {
+    id: 'msg_' + Date.now(),
+    orderId: order.id,
+    senderId: req.body.senderId || 'user_admin',
+    senderName: req.body.senderName || 'Platform Support Desk',
+    text: req.body.text,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  };
+
+  messages.push(newMsg);
+
+  // Broadcast WebSocket
+  try {
+    const payload = JSON.stringify({ type: 'MESSAGE_RECEIVED', message: newMsg });
+    for (const client of clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
+    }
+  } catch (err) {
+    console.error('WS broadcast error:', err);
+  }
+
+  res.json({ success: true, message: newMsg });
+});
 app.get('/api/disputes', (req, res) => res.json(disputes));
 app.get('/api/refunds', (req, res) => res.json(refunds));
 app.get('/api/payouts', (req, res) => res.json(payouts));
 app.get('/api/categories', (req, res) => res.json(categories));
+
+// ==========================================
+// DOUBLE-ENTRY LEDGER & FINANCIAL REST APIS
+// ==========================================
+
+// 1. Overview Financial Metrics Dashboard
+app.get('/api/admin/finance/overview', (req, res) => {
+  try {
+    const overview = financeLedger.getFinancialOverview();
+    res.json(overview);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. User Wallets Explorer & Details
+app.get('/api/admin/finance/wallets', (req, res) => {
+  try {
+    const wallets = financeLedger.getWallets();
+    res.json(wallets);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/finance/wallets/:id', (req, res) => {
+  try {
+    const data = financeLedger.getWalletById(req.params.id);
+    if (!data) return res.status(404).json({ error: 'Wallet not found' });
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/finance/wallets/:id/freeze', (req, res) => {
+  try {
+    const { reason } = req.body;
+    if (!reason) return res.status(400).json({ error: 'Mandatory reason required to freeze a wallet' });
+    const wallet = financeLedger.freezeWallet(req.params.id, reason, req.body.actor || 'Super Admin');
+    res.json(wallet);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/finance/wallets/:id/unfreeze', (req, res) => {
+  try {
+    const { reason } = req.body;
+    const wallet = financeLedger.unfreezeWallet(req.params.id, reason || 'Administrative review completed', req.body.actor || 'Super Admin');
+    res.json(wallet);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/finance/wallets/:id/restrict', (req, res) => {
+  try {
+    const { reason } = req.body;
+    if (!reason) return res.status(400).json({ error: 'Mandatory reason required to restrict a wallet' });
+    const wallet = financeLedger.restrictWallet(req.params.id, reason, req.body.actor || 'Super Admin');
+    res.json(wallet);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// 3. Transactions Explorer
+app.get('/api/admin/finance/transactions', (req, res) => {
+  try {
+    const txns = financeLedger.getTransactions();
+    res.json(txns);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/finance/transactions/:id', (req, res) => {
+  try {
+    const txn = financeLedger.getTransactionById(req.params.id);
+    if (!txn) return res.status(404).json({ error: 'Transaction not found' });
+    const journal = txn.journalId ? financeLedger.getJournalById(txn.journalId) : null;
+    res.json({ transaction: txn, journal });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Double-Entry Ledger Journals & Entries
+app.get('/api/admin/finance/ledger', (req, res) => {
+  try {
+    const journals = financeLedger.getJournals();
+    res.json(journals);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/finance/ledger/:id', (req, res) => {
+  try {
+    const journal = financeLedger.getJournalById(req.params.id);
+    if (!journal) return res.status(404).json({ error: 'Journal not found' });
+    res.json(journal);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/finance/ledger/:id/reverse', (req, res) => {
+  try {
+    const { reason, actor } = req.body;
+    if (!reason) return res.status(400).json({ error: 'Mandatory accounting reversal reason required' });
+    const reversal = financeLedger.reverseJournal(req.params.id, reason, actor || 'Chief Finance Officer');
+    res.json(reversal);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// 5. Escrow & Order Protection Vault Management
+app.get('/api/admin/finance/escrow', (req, res) => {
+  try {
+    const escrowOrders = orders.map(o => {
+      const enriched = enrichOrderWithServiceInfo(o);
+      const isDisputed = disputes.some(d => d.orderId === o.id && (d.status === 'open' || d.status === 'under_investigation'));
+      const isRefunded = refunds.some(r => r.orderId === o.id && r.status === 'approved');
+      const buyer = users.find(u => u.id === o.buyerId);
+      const seller = users.find(u => u.id === o.sellerId);
+
+      let escrowState = 'in_progress';
+      if (isDisputed) escrowState = 'disputed';
+      else if (isRefunded) escrowState = 'refunded';
+      else if (o.status === 'completed') escrowState = 'released';
+      else if (o.status === 'delivered') escrowState = 'release_pending';
+      else if (o.status === 'funded_in_escrow') escrowState = 'funded';
+
+      return {
+        ...enriched,
+        buyerName: buyer?.name || 'Buyer #' + o.buyerId,
+        buyerEmail: buyer?.email || '',
+        sellerName: seller?.name || 'Freelancer #' + o.sellerId,
+        sellerEmail: seller?.email || '',
+        platformFeeRate: '10%',
+        platformFeeAmount: Math.round(o.amount * 0.10),
+        freelancerNetAmount: Math.round(o.amount * 0.90),
+        escrowState,
+        isDisputed
+      };
+    });
+    res.json(escrowOrders);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/finance/escrow/:orderId/release', (req, res) => {
+  try {
+    const order = orders.find(o => o.id === req.params.orderId);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    // Ensure not actively disputed
+    const activeDispute = disputes.find(d => d.orderId === order.id && (d.status === 'open' || d.status === 'under_investigation'));
+    if (activeDispute) {
+      return res.status(400).json({ error: `Cannot release escrow: Order #${order.id} is under active dispute (${activeDispute.id}). Resolve the dispute first.` });
+    }
+
+    const result = financeLedger.releaseEscrow({
+      orderId: order.id,
+      orderTitle: order.title,
+      amount: order.amount,
+      sellerId: order.sellerId,
+      buyerId: order.buyerId,
+      actor: req.body.actor || 'Super Admin'
+    });
+
+    order.status = 'completed';
+
+    // Synchronize seller user walletBalance
+    const seller = users.find(u => u.id === order.sellerId);
+    if (seller) {
+      seller.walletBalance += result.freelancerNet;
+      seller.earned = (seller.earned || 0) + result.freelancerNet;
+      seller.completedJobs = (seller.completedJobs || 0) + 1;
+    }
+
+    res.json({ success: true, order, journal: result.journal, freelancerNet: result.freelancerNet, platformFee: result.platformFee });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/finance/escrow/:orderId/refund', (req, res) => {
+  try {
+    const { reason, actor } = req.body;
+    const order = orders.find(o => o.id === req.params.orderId);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    const result = financeLedger.refundEscrow({
+      orderId: order.id,
+      orderTitle: order.title,
+      amount: order.amount,
+      buyerId: order.buyerId,
+      reason: reason || 'Administrative escrow refund approval',
+      actor: actor || 'Super Admin'
+    });
+
+    // Mark refund in refunds list
+    const existingRefund = refunds.find(r => r.orderId === order.id);
+    if (existingRefund) {
+      existingRefund.status = 'approved';
+    } else {
+      refunds.push({
+        id: 'ref_' + Date.now(),
+        orderId: order.id,
+        buyerId: order.buyerId,
+        amount: order.amount,
+        reason: reason || 'Administrative escrow refund',
+        status: 'approved',
+        createdAt: new Date().toISOString().substring(0, 10)
+      });
+    }
+
+    // Synchronize buyer user walletBalance
+    const buyer = users.find(u => u.id === order.buyerId);
+    if (buyer) {
+      buyer.walletBalance += order.amount;
+    }
+
+    res.json({ success: true, order, journal: result.journal });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// 6. Payouts Management & Gateway Settlements
+app.get('/api/admin/finance/payouts', (req, res) => {
+  try {
+    const enrichedPayouts = payouts.map(p => {
+      const freelancer = users.find(u => u.id === p.freelancerId);
+      const wallet = financeLedger.getWalletById(p.freelancerId);
+      return {
+        ...p,
+        freelancerName: freelancer?.name || 'Freelancer #' + p.freelancerId,
+        freelancerEmail: freelancer?.email || '',
+        walletAvailableBalance: wallet?.wallet.availableBalance || 0,
+        currency: 'USD'
+      };
+    });
+    res.json(enrichedPayouts);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/finance/payouts/:id/approve', (req, res) => {
+  try {
+    const p = payouts.find(pay => pay.id === req.params.id);
+    if (!p) return res.status(404).json({ error: 'Payout not found' });
+    if (p.status !== 'pending') return res.status(400).json({ error: `Cannot approve payout in status "${p.status}"` });
+
+    p.status = 'approved';
+
+    auditLogs.unshift({
+      id: 'FAUD-' + Date.now(),
+      actor: req.body.actor || 'Chief Finance Officer',
+      role: 'super_admin',
+      action: 'PAYOUT_APPROVED',
+      target: `Payout #${p.id}`,
+      details: `Approved payout of $${p.amount} via ${p.method} for freelancer ${p.freelancerId}`,
+      timestamp: new Date().toLocaleString()
+    });
+
+    res.json(p);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/finance/payouts/:id/process', (req, res) => {
+  try {
+    const p = payouts.find(pay => pay.id === req.params.id);
+    if (!p) return res.status(404).json({ error: 'Payout not found' });
+    if (p.status !== 'pending' && p.status !== 'approved') {
+      return res.status(400).json({ error: `Cannot process payout in status "${p.status}"` });
+    }
+
+    const freelancer = users.find(u => u.id === p.freelancerId);
+
+    // Post Double-Entry Journal for Payout Settlement:
+    // Debit 2020 Freelancer Wallets Payable $X -> Credit 1030 Payout Gateway Transit $X
+    const journal = financeLedger.postJournal({
+      reference: `PAY-${p.id}-DISBURSED`,
+      description: `Disbursed Payout #${p.id} via ${p.method} to ${freelancer?.name || p.freelancerId} (${p.accountDetails})`,
+      eventType: 'PAYOUT_SETTLED',
+      idempotencyKey: `IDEMP-PAY-PROCESS-${p.id}`,
+      actor: req.body.actor || 'Super Admin',
+      entries: [
+        {
+          accountCode: '2020',
+          accountName: 'Freelancer Wallets Payable',
+          debit: p.amount,
+          credit: 0,
+          currency: 'USD',
+          description: `Withdrawn payout for ${freelancer?.name || p.freelancerId}`,
+          userId: p.freelancerId,
+          payoutId: p.id
+        },
+        {
+          accountCode: '1030',
+          accountName: 'Payout Gateway Transit',
+          debit: 0,
+          credit: p.amount,
+          currency: 'USD',
+          description: `Disbursed through ${p.method} gateway`,
+          payoutId: p.id
+        }
+      ]
+    });
+
+    p.status = 'processed';
+
+    // Synchronize user wallet balance
+    if (freelancer && freelancer.walletBalance >= p.amount) {
+      freelancer.walletBalance = Math.max(0, freelancer.walletBalance - p.amount);
+    }
+
+    res.json({ success: true, payout: p, journal });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/finance/payouts/:id/reject', (req, res) => {
+  try {
+    const { reason, actor } = req.body;
+    const p = payouts.find(pay => pay.id === req.params.id);
+    if (!p) return res.status(404).json({ error: 'Payout not found' });
+    if (p.status === 'processed') return res.status(400).json({ error: 'Cannot reject an already settled and processed payout.' });
+
+    financeLedger.cancelPayout({
+      payoutId: p.id,
+      freelancerId: p.freelancerId,
+      amount: p.amount,
+      reason: reason || 'Administrative rejection',
+      actor: actor || 'Chief Finance Officer'
+    });
+
+    p.status = 'cancelled';
+    res.json({ success: true, payout: p });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/finance/payouts/:id/retry', (req, res) => {
+  try {
+    const p = payouts.find(pay => pay.id === req.params.id);
+    if (!p) return res.status(404).json({ error: 'Payout not found' });
+    if (p.status !== 'failed') return res.status(400).json({ error: 'Only failed payouts can be retried.' });
+
+    p.status = 'pending';
+    auditLogs.unshift({
+      id: 'FAUD-' + Date.now(),
+      actor: req.body.actor || 'Super Admin',
+      role: 'super_admin',
+      action: 'PAYOUT_RETRIED',
+      target: `Payout #${p.id}`,
+      details: `Re-queued failed payout of $${p.amount} for retry`,
+      timestamp: new Date().toLocaleString()
+    });
+
+    res.json(p);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// 7. Reconciliation Workspace & Exception Resolution
+app.get('/api/admin/finance/reconciliation', (req, res) => {
+  try {
+    const recon = financeLedger.getReconciliationSummary();
+    res.json(recon);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/finance/reconciliation/resolve/:id', (req, res) => {
+  try {
+    const { notes, actor } = req.body;
+    if (!notes) return res.status(400).json({ error: 'Investigation notes required to mark exception resolved' });
+    const resolved = financeLedger.resolveException(req.params.id, notes, actor || 'Chief Auditor');
+    res.json(resolved);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// 8. Financial Audit Trail
+app.get('/api/admin/finance/audit', (req, res) => {
+  try {
+    const logs = financeLedger.getAuditLogs();
+    res.json(logs);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 9. Administrative Adjustments (Controlled Double-Entry Workflow)
+app.post('/api/admin/finance/adjustments/preview', (req, res) => {
+  try {
+    const { userId, amount, direction, category, reason } = req.body;
+    const preview = financeLedger.previewAdjustment({ userId, amount: Number(amount), direction, category, reason });
+    res.json(preview);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/finance/adjustments', (req, res) => {
+  try {
+    const { userId, amount, direction, category, reason, evidenceReference, actor } = req.body;
+    const result = financeLedger.executeAdministrativeAdjustment({
+      userId,
+      amount: Number(amount),
+      direction,
+      category,
+      reason,
+      evidenceReference,
+      actor: actor || 'Super Admin'
+    });
+
+    // Synchronize users array
+    const user = users.find(u => u.id === userId);
+    if (user) {
+      user.walletBalance = result.wallet.availableBalance;
+    }
+
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// 10. Reports & CSV Export Engine
+app.get('/api/admin/finance/export/:type', (req, res) => {
+  try {
+    const { type } = req.params;
+    const { filename, content } = financeLedger.generateCsvExport(type, req.query as any);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.status(200).send(content);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
 
 // Category CRUD Endpoints
 app.post('/api/admin/categories', (req, res) => {
@@ -1242,10 +2041,13 @@ app.post('/api/orders', (req, res) => {
     createdAt: new Date().toISOString().split('T')[0],
     dueDate: req.body.dueDate || new Date(Date.now() + 10 * 86400000).toISOString().split('T')[0],
     escrowProtectionStartDate: new Date().toISOString().split('T')[0],
-    escrowProtectionEndDate: new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]
+    escrowProtectionEndDate: new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0],
+    gigId: req.body.gigId,
+    projectId: req.body.projectId
   };
-  orders.unshift(newOrd);
-  res.json(newOrd);
+  const enriched = enrichOrderWithServiceInfo(newOrd);
+  orders.unshift(enriched);
+  res.json(enriched);
 });
 
 // Admin Proposals Management Endpoints
