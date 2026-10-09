@@ -600,20 +600,20 @@ export const UserWalletsLedgerModule: React.FC<{ currentUser?: any }> = ({ curre
       )}
 
       {/* MODULE HEADER & DUAL NAVIGATION */}
-      <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-6">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-6 shadow-xs">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                 Authoritative Double-Entry Accounting
               </span>
-              <span className="text-[10px] font-bold text-slate-400">· Append-Only Invariant Ledger</span>
+              <span className="text-[10px] font-bold text-slate-500">· Append-Only Invariant Ledger</span>
             </div>
-            <h2 className="text-xl font-extrabold text-white flex items-center gap-2.5">
-              <Wallet className="w-6 h-6 text-emerald-400" />
+            <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2.5">
+              <Wallet className="w-6 h-6 text-emerald-600" />
               <span>User Wallets & Double-Entry Ledger</span>
             </h2>
-            <p className="text-xs text-slate-400 mt-1 max-w-3xl">
+            <p className="text-xs text-slate-500 mt-1 max-w-3xl">
               Complete financial administration: inspect individual wallets, review balanced double-entry journals, monitor escrow protections, execute controlled adjustments, and audit trial balance parity.
             </p>
           </div>
@@ -622,8 +622,8 @@ export const UserWalletsLedgerModule: React.FC<{ currentUser?: any }> = ({ curre
             {/* Live Trial Balance Equality Status */}
             <div className={`px-3 py-1.5 rounded-xl border flex items-center gap-2 text-xs font-mono ${
               overview?.trialBalanceInBalance 
-                ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400' 
-                : 'bg-red-950/40 border-red-500/30 text-red-400 animate-pulse'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-700' 
+                : 'bg-red-50 border-red-200 text-red-700 animate-pulse'
             }`}>
               <Scale className="w-4 h-4" />
               <span className="font-bold">
@@ -637,7 +637,7 @@ export const UserWalletsLedgerModule: React.FC<{ currentUser?: any }> = ({ curre
                 setAdjUserId(wallets[0]?.userId || '');
                 setIsAdjustmentModalOpen(true);
               }}
-              className="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/10 transition-colors"
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-colors"
             >
               <Sparkles className="w-3.5 h-3.5" />
               <span>New Adjustment</span>
@@ -647,10 +647,10 @@ export const UserWalletsLedgerModule: React.FC<{ currentUser?: any }> = ({ curre
             <button
               onClick={fetchAllFinanceData}
               disabled={loading}
-              className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl border border-slate-800 transition-colors"
+              className="p-2 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl border border-slate-200 transition-colors"
               title="Refresh Authoritative Data"
             >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-400' : ''}`} />
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-600' : ''}`} />
             </button>
           </div>
         </div>
@@ -676,15 +676,15 @@ export const UserWalletsLedgerModule: React.FC<{ currentUser?: any }> = ({ curre
                 onClick={() => setSubTab(item.id as any)}
                 className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
                   active
-                    ? 'bg-emerald-500 text-slate-950 font-extrabold shadow-sm'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-900 border border-transparent hover:border-slate-800'
+                    ? 'bg-emerald-600 text-white font-extrabold shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 border border-transparent hover:border-slate-200'
                 }`}
               >
                 <Icon className="w-3.5 h-3.5" />
                 <span>{item.label}</span>
                 {item.count !== undefined && (
                   <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                    active ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-800 text-slate-400'
+                    active ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-600'
                   }`}>
                     {item.count}
                   </span>
@@ -1183,17 +1183,15 @@ export const UserWalletsLedgerModule: React.FC<{ currentUser?: any }> = ({ curre
                               if (orderMatch) {
                                 const url = resolveOrderServiceUrl({ id: orderMatch, title: t.description });
                                 return (
-                                  <a
-                                    href={url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); window.open(url, '_blank', 'noopener,noreferrer'); }}
                                     className="inline-flex items-center gap-1 text-[10px] text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-1.5 py-0.5 rounded border border-emerald-500/20"
                                     title="View Gig / Project on site in new tab"
-                                    onClick={(e) => e.stopPropagation()}
                                   >
                                     <span>View Gig</span>
                                     <ExternalLink className="w-2.5 h-2.5" />
-                                  </a>
+                                  </button>
                                 );
                               }
                               return null;
@@ -1422,40 +1420,34 @@ export const UserWalletsLedgerModule: React.FC<{ currentUser?: any }> = ({ curre
                             return (
                               <div className="space-y-1">
                                 <div className="flex items-center gap-2">
-                                  <a
-                                    href={serviceUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); window.open(serviceUrl, '_blank', 'noopener,noreferrer'); }}
                                     className="font-bold text-white hover:text-emerald-400 transition-colors inline-flex items-center gap-1.5 group cursor-pointer"
                                     title={`Open "${o.title}" on site in new tab`}
-                                    onClick={(e) => e.stopPropagation()}
                                   >
                                     <span className="group-hover:underline">{o.title}</span>
-                                  </a>
-                                  <a
-                                    href={serviceUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); window.open(serviceUrl, '_blank', 'noopener,noreferrer'); }}
                                     className="p-1 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded transition-colors inline-flex items-center cursor-pointer shrink-0"
                                     title="Open gig / project webpage in new tab"
-                                    onClick={(e) => e.stopPropagation()}
                                   >
                                     <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
-                                  </a>
+                                  </button>
                                 </div>
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <span className="text-[11px] text-slate-400 font-mono">Order #{o.id}</span>
-                                  <a
-                                    href={serviceUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); window.open(serviceUrl, '_blank', 'noopener,noreferrer'); }}
                                     className="text-[10px] text-emerald-400 hover:text-emerald-300 font-mono bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/20 hover:border-emerald-500/40 inline-flex items-center gap-1 transition-colors"
                                     title="Direct canonical URL to gig"
-                                    onClick={(e) => e.stopPropagation()}
                                   >
                                     <span>{serviceUrl}</span>
                                     <ExternalLink className="w-2.5 h-2.5" />
-                                  </a>
+                                  </button>
                                 </div>
                               </div>
                             );

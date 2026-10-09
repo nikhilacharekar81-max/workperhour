@@ -32,6 +32,7 @@ const ai = new GoogleGenAI({
 interface User {
   id: string;
   name: string;
+  username?: string;
   email: string;
   role: 'user' | 'admin' | 'super_admin' | 'moderator' | 'support';
   avatar: string;
@@ -47,6 +48,8 @@ interface User {
   verified: boolean;
   walletBalance: number;
   createdAt: string;
+  isFlagged?: boolean;
+  flagReason?: string;
 }
 
 interface GigExtra {
@@ -136,7 +139,10 @@ interface Order {
   serviceUrl?: string;
   gigSlug?: string;
   sellerUsername?: string;
+  buyerUsername?: string;
   serviceTitle?: string;
+  serviceThumbnail?: string;
+  isTimerPaused?: boolean;
 }
 
 interface Dispute {
@@ -363,6 +369,46 @@ let users: User[] = [
     verified: true,
     walletBalance: 0,
     createdAt: '2025-01-01'
+  },
+  {
+    id: 'user_bk',
+    name: 'Broadcast King',
+    username: 'broadcastking',
+    email: 'broadcastking@workperhour.com',
+    role: 'user',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&h=400&fit=crop',
+    title: 'Professional Animator & Puppet Director',
+    rating: 4.9,
+    reviewsCount: 2840,
+    hourlyRate: 75,
+    earned: 62000,
+    completedJobs: 410,
+    bio: 'Award-winning video and puppet production specialist.',
+    skills: ['Video Production', 'Puppet Rigging', 'Voiceover', 'Animation'],
+    status: 'active',
+    verified: true,
+    walletBalance: 3450,
+    createdAt: '2025-01-10'
+  },
+  {
+    id: 'user_3',
+    name: 'Bushra Khan',
+    username: 'bushra',
+    email: 'bushra@workperhour.com',
+    role: 'user',
+    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&h=400&fit=crop',
+    title: 'Senior SEO Strategist & Backlink Specialist',
+    rating: 5.0,
+    reviewsCount: 16,
+    hourlyRate: 60,
+    earned: 14200,
+    completedJobs: 88,
+    bio: 'High authority backlink building and organic SEO ranking.',
+    skills: ['SEO', 'Link Building', 'Ahrefs', 'Technical SEO'],
+    status: 'active',
+    verified: true,
+    walletBalance: 1850,
+    createdAt: '2025-02-15'
   }
 ];
 
@@ -605,6 +651,87 @@ let orders: Order[] = [
     isMuted: false,
     escrowProtectionStartDate: '2026-09-25',
     escrowProtectionEndDate: '2026-10-09'
+  },
+  {
+    id: 'ord_rev_1',
+    title: 'Modern Minimalist Logo & Brand Identity System',
+    buyerId: 'user_2',
+    sellerId: 'user_1',
+    gigId: 'gig_3',
+    sellerUsername: 'elena_rostova',
+    buyerUsername: 'marcus_vance',
+    gigSlug: 'modern-minimalist-logo-and-brand-identity-system',
+    serviceUrl: '/elena_rostova/modern-minimalist-logo-and-brand-identity-system',
+    serviceTitle: 'Modern Minimalist Logo & Brand Identity System',
+    serviceThumbnail: 'https://images.unsplash.com/photo-1626785774573-4b799315345d?w=800&h=500&fit=crop',
+    amount: 620,
+    status: 'revision',
+    createdAt: '2026-10-04',
+    dueDate: '2026-10-16',
+    requirements: 'Complete vector brand identity, typography scale, monochrome icons, and Figma component system.',
+    deliverables: 'Figma source file (.fig) and high-resolution exported SVG/PNG assets.',
+    deliverableFiles: [
+      { id: 'deliv_rev_1', name: 'brand_identity_v1_draft.fig', size: '28.4 MB', url: '#', uploadedAt: '2026-10-06 05:10 PM' },
+      { id: 'deliv_rev_2', name: 'logo_presentation_deck.pdf', size: '4.6 MB', url: '#', uploadedAt: '2026-10-06 05:12 PM' }
+    ],
+    revisions: [
+      { id: 'rev_req_1', requestedAt: '2026-10-07 02:45 PM', reason: 'Please provide high contrast monochrome variant and refine primary mark curvature.', status: 'in_progress' }
+    ],
+    adminNotes: 'Buyer requested monochrome mark variation. Freelancer confirmed re-submission within 24h.',
+    isMuted: false,
+    escrowProtectionStartDate: '2026-10-04',
+    escrowProtectionEndDate: '2026-10-18'
+  },
+  {
+    id: 'ord_canc_1',
+    title: 'Custom Shopify Dropshipping Store Setup & Integration',
+    buyerId: 'user_2',
+    sellerId: 'user_3',
+    gigId: 'gig_2',
+    sellerUsername: 'bushra',
+    buyerUsername: 'marcus_vance',
+    gigSlug: 'custom-shopify-dropshipping-store-setup',
+    serviceUrl: '/bushra/custom-shopify-dropshipping-store-setup',
+    serviceTitle: 'Custom Shopify Dropshipping Store Setup & Integration',
+    serviceThumbnail: 'https://images.unsplash.com/photo-1556742049-0a67c5574f73?w=800&h=500&fit=crop',
+    amount: 800,
+    status: 'cancelled',
+    createdAt: '2026-09-20',
+    dueDate: '2026-09-28',
+    requirements: 'Turnkey Shopify store configuration with custom liquid theme and payment gateway setup.',
+    deliverables: 'Shopify collaborator access transfer and configured store.',
+    deliverableFiles: [],
+    adminNotes: 'Order cancelled by mutual agreement following client pivot. $800 fully refunded to buyer wallet.',
+    isMuted: false,
+    escrowProtectionStartDate: '2026-09-20',
+    escrowProtectionEndDate: '2026-10-04'
+  },
+  {
+    id: 'ord_late_1',
+    title: 'AI Voice Agent with Realtime Telephony & Webhook Bridge',
+    buyerId: 'user_2',
+    sellerId: 'user_1',
+    gigId: 'gig_3',
+    sellerUsername: 'elena_rostova',
+    buyerUsername: 'marcus_vance',
+    gigSlug: 'ai-voice-agent-with-realtime-telephony',
+    serviceUrl: '/elena_rostova/ai-voice-agent-with-realtime-telephony',
+    serviceTitle: 'AI Voice Agent with Realtime Telephony & Webhook Bridge',
+    serviceThumbnail: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&h=500&fit=crop',
+    amount: 1250,
+    status: 'in_progress',
+    createdAt: '2026-09-26',
+    dueDate: '2026-10-03',
+    requirements: 'Real-time Twilio voice bridge connecting speech-to-speech AI pipeline with low latency.',
+    deliverables: 'Deployed AWS Lambda endpoint + Git repository + environment setup instructions.',
+    deliverableFiles: [
+      { id: 'deliv_late_1', name: 'telephony_architecture_spec.pdf', size: '1.8 MB', url: '#', uploadedAt: '2026-09-29 10:15 AM' }
+    ],
+    adminNotes: 'Order is overdue. Freelancer requested extra time due to Twilio carrier registration wait. Admin intervention recommended.',
+    isMuted: false,
+    isTimerPaused: false,
+    escrowProtectionStartDate: '2026-09-26',
+    escrowProtectionEndDate: '2026-10-10'
   }
 ];
 
@@ -790,23 +917,98 @@ function enrichOrderWithServiceInfo(o: Order) {
   const project = (o.projectId ? projects.find(p => p.id === o.projectId) : undefined) ||
                   projects.find(p => p.title.toLowerCase() === o.title.toLowerCase());
   const seller = users.find(u => u.id === o.sellerId);
-  const sellerUsername = o.sellerUsername || gig?.freelancerUsername || (seller?.name || '').toLowerCase().replace(/\s+/g, '_');
+  const buyer = users.find(u => u.id === o.buyerId);
+  const sellerUsername = o.sellerUsername || gig?.freelancerUsername || (seller?.username || seller?.name || '').toLowerCase().replace(/\s+/g, '_');
+  const buyerUsername = o.buyerUsername || (buyer?.username || buyer?.name || '').toLowerCase().replace(/\s+/g, '_');
   const gigSlug = o.gigSlug || gig?.slug;
   const serviceUrl = o.serviceUrl || (gig && gigSlug ? `/${sellerUsername}/${gigSlug}` : project ? `/project/${project.slug}` : undefined);
   const serviceTitle = gig?.title || project?.title || o.serviceTitle || o.title;
+  const serviceThumbnail = o.serviceThumbnail || gig?.image || 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800&h=500&fit=crop';
 
   return {
     ...o,
     gigId: o.gigId || gig?.id,
     projectId: o.projectId || project?.id,
     sellerUsername,
+    buyerUsername,
     gigSlug,
     serviceUrl,
-    serviceTitle
+    serviceTitle,
+    serviceThumbnail,
+    isTimerPaused: Boolean(o.isTimerPaused)
   };
 }
 
+// Site & Fee Settings State
+interface SiteFeeSettings {
+  platformName: string;
+  supportEmail: string;
+  currency: string;
+  currencySymbol: string;
+  freelancerCommissionRate: number;
+  buyerProcessingFeeRate: number;
+  buyerProcessingFeeFixed: number;
+  minOrderAmount: number;
+  featuredGigFee: number;
+  urgentProjectFee: number;
+  escrowHoldDays: number;
+  autoCompleteDeliveredDays: number;
+  disputeWindowDays: number;
+  minPayoutThreshold: number;
+  instantPayoutFeeRate: number;
+  freelancerOnboardingMode: 'open' | 'moderated';
+  maintenanceMode: boolean;
+  maintenanceMessage?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+let siteFeeSettings: SiteFeeSettings = {
+  platformName: 'WorkPerHour',
+  supportEmail: 'support@workperhour.com',
+  currency: 'USD',
+  currencySymbol: '$',
+  freelancerCommissionRate: 10,
+  buyerProcessingFeeRate: 3,
+  buyerProcessingFeeFixed: 0,
+  minOrderAmount: 10,
+  featuredGigFee: 15,
+  urgentProjectFee: 25,
+  escrowHoldDays: 14,
+  autoCompleteDeliveredDays: 3,
+  disputeWindowDays: 14,
+  minPayoutThreshold: 50,
+  instantPayoutFeeRate: 1.5,
+  freelancerOnboardingMode: 'open',
+  maintenanceMode: false,
+  maintenanceMessage: 'WorkPerHour is undergoing brief scheduled maintenance. Escrow funds and data remain 100% secure.',
+  updatedAt: new Date().toISOString().split('T')[0],
+  updatedBy: 'Admin Chief (Super Admin)'
+};
+
 // REST API Endpoints
+app.get('/api/admin/settings', (req, res) => res.json(siteFeeSettings));
+app.post('/api/admin/settings', (req, res) => {
+  siteFeeSettings = {
+    ...siteFeeSettings,
+    ...req.body,
+    updatedAt: new Date().toISOString().split('T')[0],
+    updatedBy: req.body.updatedBy || 'Super Admin'
+  };
+
+  auditLogs.unshift({
+    id: 'log_' + Date.now(),
+    actor: req.body.updatedBy || 'Super Admin',
+    role: 'super_admin',
+    action: 'SITE_FEE_SETTINGS_UPDATED',
+    target: 'Platform Settings & Fee Structure',
+    details: `Updated settings: Commission=${siteFeeSettings.freelancerCommissionRate}%, EscrowHold=${siteFeeSettings.escrowHoldDays}d, BuyerFee=${siteFeeSettings.buyerProcessingFeeRate}%`,
+    timestamp: new Date().toLocaleString()
+  });
+
+  res.json({ success: true, settings: siteFeeSettings });
+});
+
 app.get('/api/users', (req, res) => res.json(users));
 app.get('/api/gigs', (req, res) => res.json(gigs));
 app.get('/api/projects', (req, res) => res.json(projects));
@@ -938,6 +1140,58 @@ app.patch('/api/orders/:id/mute', (req, res) => {
   messages.push(sysMsg);
 
   res.json({ success: true, isMuted: order.isMuted });
+});
+
+// Toggle Pause Order Timer
+app.patch('/api/orders/:id/pause-timer', (req, res) => {
+  const order = orders.find(o => o.id === req.params.id);
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+
+  order.isTimerPaused = !order.isTimerPaused;
+  const sysMsg: Message = {
+    id: 'msg_' + Date.now(),
+    orderId: order.id,
+    senderId: 'system',
+    senderName: 'Administration Alert',
+    text: order.isTimerPaused 
+      ? `⏸️ Delivery countdown paused by Administrator pending dispute/clarification.`
+      : `▶️ Delivery countdown resumed by Administrator. Normal timer active.`,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  };
+  messages.push(sysMsg);
+
+  auditLogs.unshift({
+    id: 'log_' + Date.now(),
+    actor: 'Admin Chief',
+    role: 'super_admin',
+    action: order.isTimerPaused ? 'ORDER_TIMER_PAUSED' : 'ORDER_TIMER_RESUMED',
+    target: `Order #${order.id}`,
+    details: order.isTimerPaused ? 'Timer paused by Admin' : 'Timer resumed by Admin',
+    timestamp: new Date().toLocaleString()
+  });
+
+  res.json({ success: true, isTimerPaused: order.isTimerPaused, order: enrichOrderWithServiceInfo(order) });
+});
+
+// Flag / Unflag User for Terms of Service review
+app.post('/api/users/:id/flag', (req, res) => {
+  const user = users.find(u => u.id === req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  user.isFlagged = !user.isFlagged;
+  user.flagReason = user.isFlagged ? (req.body.reason || 'Flagged for TOS investigation.') : undefined;
+
+  auditLogs.unshift({
+    id: 'log_' + Date.now(),
+    actor: 'Admin Chief',
+    role: 'super_admin',
+    action: user.isFlagged ? 'USER_FLAGGED_TOS' : 'USER_UNFLAGGED_TOS',
+    target: `User #${user.id} (${user.name})`,
+    details: user.flagReason || 'Flag removed',
+    timestamp: new Date().toLocaleString()
+  });
+
+  res.json({ success: true, isFlagged: user.isFlagged, flagReason: user.flagReason, user });
 });
 
 // Force Complete & Release Funds

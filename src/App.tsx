@@ -2,13 +2,15 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Briefcase, Search, Star, ShieldCheck, Clock, DollarSign, Send, 
   MessageSquare, User, PlusCircle, CheckCircle2, AlertCircle, 
-  Sparkles, Award, ArrowRight, ChevronRight, Filter, Globe, Lock, Check, RefreshCw, ArrowLeft,
+  Sparkles, Award, ArrowRight, ChevronRight, ChevronDown, Filter, Globe, Lock, Check, RefreshCw, ArrowLeft,
   Settings, Users, Layers, TrendingUp, AlertTriangle, Eye, Trash2, CheckCircle, BarChart3,
-  LayoutDashboard, ShieldAlert, Sliders, LogOut, FileText, Activity, Wallet, Scale, CornerDownLeft,
+  LayoutDashboard, ShieldAlert, Sliders, LogOut, FileText, Activity, Wallet, Scale, CornerDownLeft, ShoppingBag, CreditCard,
   HelpCircle, Flag, MessageCircle, FileCode, KeyRound, Shield, ExternalLink
 } from 'lucide-react';
 import { UserWalletsLedgerModule } from './components/UserWalletsLedgerModule';
 import { AdminOrdersManager } from './components/AdminOrdersManager';
+import { SiteFeeSettingsModule } from './components/SiteFeeSettingsModule';
+import { PaymentsModule } from './components/PaymentsModule';
 
 interface GigExtra {
   id: string;
@@ -304,7 +306,41 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessageText, setNewMessageText] = useState('');
 
+  // Workstream / People / Seller Profile state (PeoplePerHour style)
+  const [workstreamTab, setWorkstreamTab] = useState<'all' | 'inbox' | 'discussion' | 'in_progress' | 'completed' | 'starred' | 'archived' | 'escrow'>('all');
+  const [workstreamSearch, setWorkstreamSearch] = useState('');
+  const [peopleSearch, setPeopleSearch] = useState('');
+  const [starredWorkstreams, setStarredWorkstreams] = useState<string[]>([]);
+  const [selectedPersonFilter, setSelectedPersonFilter] = useState<string | null>(null);
+  const [isStartWorkstreamModalOpen, setIsStartWorkstreamModalOpen] = useState(false);
+  const [newWsTitle, setNewWsTitle] = useState('');
+  const [newWsRecipient, setNewWsRecipient] = useState('Stephen (UK)');
+  const [newWsAmount, setNewWsAmount] = useState(350);
+  const [profileTab, setProfileTab] = useState<'gigs' | 'portfolio' | 'reviews' | 'endorsements'>('gigs');
+
+  const handleCreateNewWorkstream = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newWsTitle.trim()) return;
+    const newOrd: Order = {
+      id: `ord_${Date.now()}`,
+      title: newWsTitle,
+      buyerId: currentUser.id,
+      sellerId: newWsRecipient,
+      amount: newWsAmount,
+      status: 'in_progress',
+      createdAt: new Date().toISOString().split('T')[0],
+      dueDate: new Date(Date.now() + 7*86400000).toISOString().split('T')[0],
+      requirements: 'Initial scope agreed via workstream.'
+    };
+    setOrders([newOrd, ...orders]);
+    setSelectedOrder(newOrd);
+    setIsStartWorkstreamModalOpen(false);
+    setNewWsTitle('');
+    alert(`Workstream "${newWsTitle}" successfully started!`);
+  };
+
   // Admin Module Navigation (20 Modules)
+  const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
   const [adminTab, setAdminTab] = useState<
     'overview' | 'users' | 'projects' | 'gigs' | 'categories' | 
     'proposals' | 'contracts' | 'payments' | 'wallet' | 'escrow' | 
@@ -558,7 +594,7 @@ export default function App() {
     try {
       const activeUserId = impersonatedUser ? impersonatedUser.id : currentUser.id;
       fetchUserEmails(activeUserId);
-      const [uRes, gRes, pRes, prRes, oRes, dRes, rRes, payRes, cRes, revRes, sRes, aRes] = await Promise.all([
+      const [uRes, gRes, pRes, prRes, oRes, dRes, rRes, payRes, cRes, revRes, sRes, aRes, setRes] = await Promise.all([
         fetch('/api/users'),
         fetch('/api/gigs'),
         fetch('/api/projects'),
@@ -570,7 +606,8 @@ export default function App() {
         fetch('/api/categories'),
         fetch('/api/reviews'),
         fetch('/api/support-tickets'),
-        fetch('/api/audit-logs')
+        fetch('/api/audit-logs'),
+        fetch('/api/admin/settings')
       ]);
 
       const usersData = await safeJson(uRes, []);
@@ -585,6 +622,7 @@ export default function App() {
       const reviewsData = await safeJson(revRes, []);
       const supportTicketsData = await safeJson(sRes, []);
       const auditLogsData = await safeJson(aRes, []);
+      const settingsData = await safeJson(setRes, null);
 
       if (usersData.length > 0) setUsersList(usersData);
       if (gigsData.length > 0) setGigs(gigsData);
@@ -604,6 +642,10 @@ export default function App() {
       if (reviewsData.length > 0) setReviews(reviewsData);
       if (supportTicketsData.length > 0) setSupportTickets(supportTicketsData);
       if (auditLogsData.length > 0) setAuditLogs(auditLogsData);
+      if (settingsData && settingsData.freelancerCommissionRate !== undefined) {
+        setPlatformFee(settingsData.freelancerCommissionRate);
+        if (settingsData.escrowHoldDays) setEscrowProtectionDays(settingsData.escrowHoldDays);
+      }
     } catch (e) {
       console.error('Error loading admin data:', e);
     }
@@ -1449,7 +1491,7 @@ export default function App() {
   };
 
   // Reserved top-level route segments
-  const reservedRoutes = ['gigs', 'projects', 'categories', 'orders', 'messages', 'create-gig', 'post-project', 'admin'];
+  const reservedRoutes = ['gigs', 'projects', 'categories', 'orders', 'messages', 'create-gig', 'post-project', 'admin', 'profile'];
 
   // Route matching
   const pathParts = path.split('/').filter(Boolean);
@@ -1491,7 +1533,23 @@ export default function App() {
     }
   }
 
-  const isGigsList = (path === '/gigs' || path === '/' || isCategoryRoute) && !isGigDetail;
+  let isProfilePage = false;
+  let profileUserUsername = null;
+  if (!isGigDetail) {
+    if (pathParts.length === 1 && !reservedRoutes.includes(pathParts[0].toLowerCase())) {
+      profileUserUsername = pathParts[0].toLowerCase();
+      isProfilePage = true;
+    } else if (path.startsWith('/profile/') && pathParts.length >= 2) {
+      profileUserUsername = pathParts[1].toLowerCase();
+      isProfilePage = true;
+    }
+  }
+
+  const profileUser = isProfilePage 
+    ? (usersList.find(u => slugify(u.name) === profileUserUsername || u.id === profileUserUsername) || (impersonatedUser || currentUser))
+    : null;
+
+  const isGigsList = (path === '/gigs' || path === '/' || isCategoryRoute) && !isGigDetail && !isProfilePage;
 
   // Project proposal route check: /projects/:id
   const isProjectDetail = path.startsWith('/projects/') && path.length > 10;
@@ -1518,22 +1576,22 @@ export default function App() {
   // Dedicated Admin Panel View with 20 Comprehensive Modules & Sidebar
   if (isAdmin) {
     return (
-      <div className="min-h-screen bg-slate-900 text-slate-100 flex font-sans selection:bg-emerald-500 selection:text-white">
+      <div className="min-h-screen bg-slate-50 text-slate-900 flex font-sans selection:bg-emerald-500 selection:text-white">
         {/* ADMIN SIDEBAR */}
-        <aside className="w-72 bg-slate-950 border-r border-slate-800 flex flex-col justify-between p-5 shrink-0 sticky top-0 h-screen overflow-y-auto">
+        <aside className="w-72 bg-white border-r border-slate-200 flex flex-col justify-between p-5 shrink-0 sticky top-0 h-screen overflow-y-auto shadow-xs">
           <div>
             {/* Admin Brand */}
-            <div className="flex items-center justify-between pb-6 mb-6 border-b border-slate-800">
+            <div className="flex items-center justify-between pb-6 mb-6 border-b border-slate-200">
               <a href="/gigs" onClick={(e) => navigate('/gigs', e)} className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center font-bold text-base shadow-md">
+                <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold text-base shadow-sm">
                   W
                 </div>
                 <div>
-                  <span className="text-sm font-extrabold text-white block leading-none">WorkPerHour</span>
-                  <span className="text-[10px] text-emerald-400 font-semibold tracking-wider uppercase">Super Admin Suite</span>
+                  <span className="text-sm font-extrabold text-slate-900 block leading-none">WorkPerHour</span>
+                  <span className="text-[10px] text-emerald-600 font-semibold tracking-wider uppercase">Super Admin Suite</span>
                 </div>
               </a>
-              <span className="text-[9px] bg-emerald-500/20 text-emerald-400 font-mono px-2 py-0.5 rounded border border-emerald-500/30">v3.0 RBAC</span>
+              <span className="text-[9px] bg-emerald-50 text-emerald-700 font-mono px-2 py-0.5 rounded border border-emerald-200">v3.0 RBAC</span>
             </div>
 
             {/* Sidebar Navigation: 20 Enterprise Admin Modules */}
@@ -1567,7 +1625,7 @@ export default function App() {
                   <button
                     key={item.id}
                     onClick={() => setAdminTab(item.id as any)}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${isActive ? 'bg-emerald-500 text-slate-950 shadow-md font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'}`}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${isActive ? 'bg-emerald-600 text-white shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
                   >
                     <IconComp className="w-4 h-4 shrink-0" />
                     <span className="truncate">{item.label}</span>
@@ -1578,21 +1636,21 @@ export default function App() {
           </div>
 
           {/* System Status & Exit */}
-          <div className="space-y-4 pt-6 border-t border-slate-800 mt-6">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+          <div className="space-y-4 pt-6 border-t border-slate-200 mt-6">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Gateway Telemetry</span>
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Gateway Telemetry</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
               </div>
-              <p className="text-[11px] text-slate-300 font-medium">RBAC Active · 14-Day Escrow Locked</p>
+              <p className="text-[11px] text-slate-700 font-medium">RBAC Active · 14-Day Escrow Locked</p>
             </div>
 
             <a 
               href="/gigs" 
               onClick={(e) => navigate('/gigs', e)}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors"
+              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors border border-slate-200"
             >
-              <LogOut className="w-4 h-4 text-emerald-400" />
+              <LogOut className="w-4 h-4 text-emerald-600" />
               <span>Exit Admin Portal</span>
             </a>
           </div>
@@ -1601,10 +1659,10 @@ export default function App() {
         {/* MAIN ADMIN CONTENT AREA */}
         <main className="flex-1 p-8 overflow-y-auto">
           {/* Header */}
-          <div className="flex items-center justify-between mb-8 pb-6 border-b border-slate-800">
+          <div className="flex items-center justify-between mb-8 pb-6 border-b border-slate-200">
             <div>
-              <span className="text-xs font-semibold text-emerald-400 block mb-1">Super Administrator Console</span>
-              <h1 className="text-2xl font-extrabold text-white">
+              <span className="text-xs font-semibold text-emerald-600 block mb-1">Super Administrator Console</span>
+              <h1 className="text-2xl font-black text-slate-900">
                 {adminTab === 'overview' && '1. Admin Dashboard & Metrics'}
                 {adminTab === 'users' && '2. User Management & Impersonation'}
                 {adminTab === 'projects' && '3. Projects & RFP Moderation'}
@@ -1630,7 +1688,7 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-3">
-              <span className="text-xs text-slate-400 bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 font-mono">
+              <span className="text-xs text-slate-700 bg-white px-3 py-1.5 rounded-lg border border-slate-200 font-mono shadow-xs">
                 RBAC Level: Super Admin
               </span>
             </div>
@@ -1640,61 +1698,61 @@ export default function App() {
           {adminTab === 'overview' && (
             <div className="space-y-8">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6">
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Escrow Balance</span>
-                    <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Escrow Balance</span>
+                    <ShieldCheck className="w-5 h-5 text-emerald-600" />
                   </div>
-                  <div className="text-2xl font-extrabold text-white">
+                  <div className="text-2xl font-black text-slate-900">
                     ${orders.reduce((sum, o) => sum + o.amount, 0).toLocaleString()}
                   </div>
-                  <span className="text-[11px] text-emerald-400 font-semibold mt-1 block">Mandatory 14-Day Protection Active</span>
+                  <span className="text-[11px] text-emerald-600 font-semibold mt-1 block">Mandatory 14-Day Protection Active</span>
                 </div>
 
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6">
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Active Users</span>
-                    <Users className="w-5 h-5 text-indigo-400" />
+                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Active Users</span>
+                    <Users className="w-5 h-5 text-indigo-600" />
                   </div>
-                  <div className="text-2xl font-extrabold text-white">{usersList.length}</div>
-                  <span className="text-[11px] text-slate-400 mt-1 block">Verified Buyers & Sellers</span>
+                  <div className="text-2xl font-black text-slate-900">{usersList.length}</div>
+                  <span className="text-[11px] text-slate-500 mt-1 block">Verified Buyers & Sellers</span>
                 </div>
 
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6">
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Disputes Open</span>
-                    <AlertTriangle className="w-5 h-5 text-amber-400" />
+                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Disputes Open</span>
+                    <AlertTriangle className="w-5 h-5 text-amber-600" />
                   </div>
-                  <div className="text-2xl font-extrabold text-amber-400">{disputes.length}</div>
-                  <span className="text-[11px] text-amber-400 font-semibold mt-1 block">Requires Resolution</span>
+                  <div className="text-2xl font-black text-amber-600">{disputes.length}</div>
+                  <span className="text-[11px] text-amber-600 font-semibold mt-1 block">Requires Resolution</span>
                 </div>
 
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6">
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Platform Take Revenue</span>
-                    <TrendingUp className="w-5 h-5 text-emerald-400" />
+                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Platform Take Revenue</span>
+                    <TrendingUp className="w-5 h-5 text-emerald-600" />
                   </div>
-                  <div className="text-2xl font-extrabold text-white">
+                  <div className="text-2xl font-black text-slate-900">
                     ${(orders.reduce((sum, o) => sum + o.amount, 0) * (platformFee / 100)).toFixed(0)}
                   </div>
-                  <span className="text-[11px] text-emerald-400 font-semibold mt-1 block">{platformFee}% Platform Take Rate</span>
+                  <span className="text-[11px] text-emerald-600 font-semibold mt-1 block">{platformFee}% Platform Take Rate</span>
                 </div>
               </div>
 
               {/* Escrow Ledger & System Gateways */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6">
-                  <h3 className="text-base font-bold text-white mb-4">Active Escrow Protection Orders</h3>
+                <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs">
+                  <h3 className="text-base font-bold text-slate-900 mb-4">Active Escrow Protection Orders</h3>
                   <div className="space-y-3">
                     {orders.map(ord => (
-                      <div key={ord.id} className="flex items-center justify-between p-4 bg-slate-900 rounded-2xl border border-slate-800">
+                      <div key={ord.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-200">
                         <div>
-                          <span className="text-xs font-bold text-white block mb-0.5">{ord.title}</span>
-                          <span className="text-[11px] text-slate-400">Order #{ord.id} · Due {ord.dueDate}</span>
+                          <span className="text-xs font-bold text-slate-900 block mb-0.5">{ord.title}</span>
+                          <span className="text-[11px] text-slate-500">Order #{ord.id} · Due {ord.dueDate}</span>
                         </div>
                         <div className="text-right">
-                          <span className="text-sm font-extrabold text-white block">${ord.amount}</span>
-                          <span className="text-[10px] uppercase font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                          <span className="text-sm font-extrabold text-slate-900 block">${ord.amount}</span>
+                          <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                             14-Day Escrow Protection
                           </span>
                         </div>
@@ -1703,16 +1761,16 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6">
-                  <h3 className="text-base font-bold text-white mb-4">System Alerts & Support Desk</h3>
+                <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs">
+                  <h3 className="text-base font-bold text-slate-900 mb-4">System Alerts & Support Desk</h3>
                   <div className="space-y-3">
                     {supportTickets.map(ticket => (
-                      <div key={ticket.id} className="p-4 bg-slate-900 rounded-2xl border border-slate-800 flex items-center justify-between">
+                      <div key={ticket.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
                         <div>
-                          <span className="text-xs font-bold text-white block mb-0.5">{ticket.subject}</span>
-                          <span className="text-[11px] text-slate-400">Ticket #{ticket.id} by {ticket.userName}</span>
+                          <span className="text-xs font-bold text-slate-900 block mb-0.5">{ticket.subject}</span>
+                          <span className="text-[11px] text-slate-500">Ticket #{ticket.id} by {ticket.userName}</span>
                         </div>
-                        <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-1 rounded uppercase">
+                        <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded uppercase border border-amber-200">
                           {ticket.priority} Priority
                         </span>
                       </div>
@@ -1727,16 +1785,16 @@ export default function App() {
           {adminTab === 'users' && (
             <div className="space-y-6">
               {/* Top User Management Bar */}
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-4">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4 shadow-xs">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
                   <div>
-                    <h3 className="text-base font-bold text-white flex items-center gap-2">
-                      <Users className="w-5 h-5 text-emerald-400" />
+                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <Users className="w-5 h-5 text-emerald-600" />
                       <span>User Account Management & Verification</span>
                     </h3>
-                    <p className="text-xs text-slate-400 mt-0.5">Search, filter, view complete activity history, edit profiles, toggle verification, and restrict user accounts.</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Search, filter, view complete activity history, edit profiles, toggle verification, and restrict user accounts.</p>
                   </div>
-                  <span className="text-xs text-slate-400 font-mono bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800 shrink-0">
+                  <span className="text-xs text-slate-700 font-mono bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 shrink-0 font-medium">
                     {usersList.length} Total Users Registered
                   </span>
                 </div>
@@ -1745,13 +1803,13 @@ export default function App() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {/* Search Input */}
                   <div className="relative">
-                    <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                     <input 
                       type="text" 
                       placeholder="Search name, email, skills, title..." 
                       value={userSearchQuery}
                       onChange={(e) => setUserSearchQuery(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                      className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-emerald-500"
                     />
                   </div>
 
@@ -1760,7 +1818,7 @@ export default function App() {
                     <select 
                       value={userStatusFilter}
                       onChange={(e) => setUserStatusFilter(e.target.value as any)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500"
                     >
                       <option value="all">All Account Statuses</option>
                       <option value="active">Active</option>
@@ -1774,7 +1832,7 @@ export default function App() {
                     <select 
                       value={userVerifiedFilter}
                       onChange={(e) => setUserVerifiedFilter(e.target.value as any)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500"
                     >
                       <option value="all">All Verification Statuses</option>
                       <option value="verified">Verified Only ✓</option>
@@ -1787,7 +1845,7 @@ export default function App() {
                     <select 
                       value={userRoleFilter}
                       onChange={(e) => setUserRoleFilter(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500"
                     >
                       <option value="all">All Roles</option>
                       <option value="user">Marketplace User</option>
@@ -1800,11 +1858,11 @@ export default function App() {
               </div>
 
               {/* Users Table */}
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6">
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="bg-slate-900 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                      <tr className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200">
                         <th className="p-4">User Details</th>
                         <th className="p-4">Role & Title</th>
                         <th className="p-4">Wallet / Hourly</th>
@@ -1813,7 +1871,7 @@ export default function App() {
                         <th className="p-4 text-right">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800/60 text-xs text-slate-300">
+                    <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
                       {usersList
                         .filter(u => {
                           const q = userSearchQuery.toLowerCase();
@@ -1830,43 +1888,43 @@ export default function App() {
                           return matchesSearch && matchesStatus && matchesRole && matchesVerified;
                         })
                         .map(u => (
-                          <tr key={u.id} className="hover:bg-slate-900/50 transition-colors">
+                          <tr key={u.id} className="hover:bg-slate-50/80 transition-colors">
                             <td className="p-4">
                               <div className="flex items-center gap-3">
-                                <img src={u.avatar} className="w-10 h-10 rounded-full object-cover ring-2 ring-slate-800" />
+                                <img src={u.avatar} className="w-10 h-10 rounded-full object-cover ring-2 ring-slate-200" />
                                 <div>
                                   <div className="flex items-center gap-1.5">
-                                    <span className="font-bold text-white text-sm">{u.name}</span>
+                                    <span className="font-bold text-slate-900 text-sm">{u.name}</span>
                                     {u.verified && (
-                                      <span className="bg-emerald-500/20 text-emerald-400 p-0.5 rounded-full" title="Verified User">
+                                      <span className="bg-emerald-50 text-emerald-600 p-0.5 rounded-full border border-emerald-200" title="Verified User">
                                         <CheckCircle2 className="w-3.5 h-3.5" />
                                       </span>
                                     )}
                                   </div>
-                                  <span className="text-[11px] text-slate-400">{u.email}</span>
+                                  <span className="text-[11px] text-slate-500">{u.email}</span>
                                 </div>
                               </div>
                             </td>
                             <td className="p-4">
                               <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase block w-max mb-1 ${
-                                u.role === 'super_admin' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' :
-                                u.role === 'moderator' ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
-                                u.role === 'support' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
-                                'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                u.role === 'super_admin' ? 'bg-purple-50 text-purple-700 border border-purple-200' :
+                                u.role === 'moderator' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
+                                u.role === 'support' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                                'bg-emerald-50 text-emerald-700 border border-emerald-200'
                               }`}>
                                 {u.role.replace('_', ' ')}
                               </span>
-                              <span className="text-[11px] text-slate-400 truncate max-w-[150px] block">{u.title || 'Marketplace Member'}</span>
+                              <span className="text-[11px] text-slate-500 truncate max-w-[150px] block">{u.title || 'Marketplace Member'}</span>
                             </td>
                             <td className="p-4">
-                              <span className="font-extrabold text-white block">${u.walletBalance.toLocaleString()}</span>
-                              <span className="text-[11px] text-slate-400">${u.hourlyRate || 0}/hr</span>
+                              <span className="font-extrabold text-slate-900 block">${u.walletBalance.toLocaleString()}</span>
+                              <span className="text-[11px] text-slate-500">${u.hourlyRate || 0}/hr</span>
                             </td>
                             <td className="p-4">
                               <button 
                                 onClick={() => handleToggleUserVerify(u.id)}
-                                className={`px-2.5 py-1 rounded-lg font-bold text-[10px] uppercase border transition-colors ${
-                                  u.verified ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'
+                                className={`px-2.5 py-1 rounded-lg font-bold text-[10px] uppercase border transition-colors cursor-pointer ${
+                                  u.verified ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                                 }`}
                               >
                                 {u.verified ? '✓ Verified' : '+ Verify Badge'}
@@ -1874,9 +1932,9 @@ export default function App() {
                             </td>
                             <td className="p-4">
                               <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase border ${
-                                u.status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                                u.status === 'suspended' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
-                                'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                                u.status === 'active' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                u.status === 'suspended' ? 'bg-red-50 text-red-700 border-red-200' :
+                                'bg-amber-50 text-amber-700 border-amber-200'
                               }`}>
                                 {u.status}
                               </span>
@@ -1885,20 +1943,20 @@ export default function App() {
                               {/* Inspect Activity */}
                               <button 
                                 onClick={() => setInspectingUser(u)}
-                                className="px-2.5 py-1.5 bg-slate-800 text-slate-200 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 transition-colors inline-flex items-center gap-1 text-[11px]"
+                                className="px-2.5 py-1.5 bg-slate-50 text-slate-700 border border-slate-200 font-bold rounded-lg hover:bg-slate-100 transition-colors inline-flex items-center gap-1 text-[11px] cursor-pointer"
                                 title="View complete user activity & history"
                               >
-                                <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                                <Eye className="w-3.5 h-3.5 text-emerald-600" />
                                 <span>Activity</span>
                               </button>
 
                               {/* Edit Profile */}
                               <button 
                                 onClick={() => handleOpenEditUserModal(u)}
-                                className="px-2.5 py-1.5 bg-slate-800 text-slate-200 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 transition-colors inline-flex items-center gap-1 text-[11px]"
+                                className="px-2.5 py-1.5 bg-slate-50 text-slate-700 border border-slate-200 font-bold rounded-lg hover:bg-slate-100 transition-colors inline-flex items-center gap-1 text-[11px] cursor-pointer"
                                 title="Edit user details"
                               >
-                                <Settings className="w-3.5 h-3.5 text-indigo-400" />
+                                <Settings className="w-3.5 h-3.5 text-indigo-600" />
                                 <span>Edit</span>
                               </button>
 
@@ -1906,14 +1964,14 @@ export default function App() {
                               {u.status === 'active' ? (
                                 <button 
                                   onClick={() => handleUserStatusToggle(u.id, 'suspended')}
-                                  className="px-2.5 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 font-bold rounded-lg hover:bg-red-500/20 text-[11px]"
+                                  className="px-2.5 py-1.5 bg-red-50 text-red-700 border border-red-200 font-bold rounded-lg hover:bg-red-100 text-[11px] cursor-pointer"
                                 >
                                   Suspend
                                 </button>
                               ) : (
                                 <button 
                                   onClick={() => handleUserStatusToggle(u.id, 'active')}
-                                  className="px-2.5 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold rounded-lg hover:bg-emerald-500/20 text-[11px]"
+                                  className="px-2.5 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold rounded-lg hover:bg-emerald-100 text-[11px] cursor-pointer"
                                 >
                                   Activate
                                 </button>
@@ -1922,7 +1980,7 @@ export default function App() {
                               {u.status !== 'restricted' && (
                                 <button 
                                   onClick={() => handleUserStatusToggle(u.id, 'restricted')}
-                                  className="px-2.5 py-1.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold rounded-lg hover:bg-amber-500/20 text-[11px]"
+                                  className="px-2.5 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 font-bold rounded-lg hover:bg-amber-100 text-[11px] cursor-pointer"
                                 >
                                   Restrict
                                 </button>
@@ -1931,7 +1989,7 @@ export default function App() {
                               {/* Impersonate */}
                               <button 
                                 onClick={() => handleStartImpersonation(u)}
-                                className="px-2.5 py-1.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-bold rounded-lg hover:bg-indigo-500/30 transition-colors text-[11px]"
+                                className="px-2.5 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold rounded-lg hover:bg-indigo-100 transition-colors text-[11px] cursor-pointer"
                               >
                                 Impersonate
                               </button>
@@ -1939,7 +1997,7 @@ export default function App() {
                               {/* Delete User */}
                               <button 
                                 onClick={() => handleDeleteUser(u.id)}
-                                className="px-2 py-1.5 bg-red-950/40 text-red-400 border border-red-900/50 font-bold rounded-lg hover:bg-red-900/50 text-[11px]"
+                                className="px-2 py-1.5 bg-red-50 text-red-700 border border-red-200 font-bold rounded-lg hover:bg-red-100 text-[11px] cursor-pointer"
                                 title="Delete user permanently"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -1954,29 +2012,29 @@ export default function App() {
 
               {/* INSPECT USER ACTIVITY HISTORY MODAL */}
               {inspectingUser && (
-                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-4xl w-full space-y-6 max-h-[90vh] overflow-y-auto text-slate-200">
+                <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-4xl w-full space-y-6 max-h-[90vh] overflow-y-auto text-slate-800 shadow-2xl">
                     {/* Header */}
-                    <div className="flex items-start justify-between pb-4 border-b border-slate-800">
+                    <div className="flex items-start justify-between pb-4 border-b border-slate-100">
                       <div className="flex items-center gap-4">
                         <img src={inspectingUser.avatar} className="w-14 h-14 rounded-full object-cover ring-2 ring-emerald-500/30" />
                         <div>
                           <div className="flex items-center gap-2">
-                            <h3 className="text-xl font-extrabold text-white">{inspectingUser.name}</h3>
+                            <h3 className="text-xl font-extrabold text-slate-900">{inspectingUser.name}</h3>
                             {inspectingUser.verified && (
-                              <span className="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-md text-xs font-bold flex items-center gap-1">
+                              <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md text-xs font-bold flex items-center gap-1 border border-emerald-200">
                                 <CheckCircle2 className="w-3.5 h-3.5" /> Verified
                               </span>
                             )}
                           </div>
-                          <p className="text-xs text-slate-400">{inspectingUser.email} · Role: <span className="text-emerald-400 uppercase font-bold">{inspectingUser.role}</span></p>
-                          <p className="text-xs text-slate-300 font-medium mt-1">{inspectingUser.title}</p>
+                          <p className="text-xs text-slate-500">{inspectingUser.email} · Role: <span className="text-emerald-700 uppercase font-bold">{inspectingUser.role}</span></p>
+                          <p className="text-xs text-slate-600 font-medium mt-1">{inspectingUser.title}</p>
                         </div>
                       </div>
 
                       <button 
                         onClick={() => setInspectingUser(null)}
-                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl"
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer"
                       >
                         Close
                       </button>
@@ -1984,32 +2042,32 @@ export default function App() {
 
                     {/* Stats summary row */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                      <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center">
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Wallet Balance</span>
-                        <span className="text-lg font-extrabold text-white">${inspectingUser.walletBalance.toLocaleString()}</span>
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Wallet Balance</span>
+                        <span className="text-lg font-extrabold text-slate-900">${inspectingUser.walletBalance.toLocaleString()}</span>
                       </div>
-                      <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center">
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Total Earned</span>
-                        <span className="text-lg font-extrabold text-emerald-400">${(inspectingUser.earned || 0).toLocaleString()}</span>
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Total Earned</span>
+                        <span className="text-lg font-extrabold text-emerald-700">${(inspectingUser.earned || 0).toLocaleString()}</span>
                       </div>
-                      <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center">
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Hourly Rate</span>
-                        <span className="text-lg font-extrabold text-white">${inspectingUser.hourlyRate || 0}/hr</span>
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Hourly Rate</span>
+                        <span className="text-lg font-extrabold text-slate-900">${inspectingUser.hourlyRate || 0}/hr</span>
                       </div>
-                      <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center">
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Completed Jobs</span>
-                        <span className="text-lg font-extrabold text-indigo-400">{inspectingUser.completedJobs || 0}</span>
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Completed Jobs</span>
+                        <span className="text-lg font-extrabold text-indigo-700">{inspectingUser.completedJobs || 0}</span>
                       </div>
                     </div>
 
                     {/* Tabs for complete user activity */}
-                    <div className="flex items-center gap-2 border-b border-slate-800 pb-2 overflow-x-auto">
+                    <div className="flex items-center gap-2 border-b border-slate-100 pb-2 overflow-x-auto">
                       {(['overview', 'gigs', 'projects', 'proposals', 'orders', 'reviews', 'tickets'] as const).map(tab => (
                         <button
                           key={tab}
                           onClick={() => setUserActivityTab(tab)}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold uppercase transition-colors ${
-                            userActivityTab === tab ? 'bg-emerald-500 text-slate-950 shadow-md' : 'bg-slate-950 text-slate-400 hover:bg-slate-800'
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold uppercase transition-colors cursor-pointer ${
+                            userActivityTab === tab ? 'bg-slate-900 text-white shadow-xs' : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
                           }`}
                         >
                           {tab === 'overview' && 'Overview'}
@@ -2026,29 +2084,29 @@ export default function App() {
                     {/* Tab 1: Overview */}
                     {userActivityTab === 'overview' && (
                       <div className="space-y-4 text-xs">
-                        <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                          <span className="text-slate-400 font-bold uppercase block mb-1">Biography</span>
-                          <p className="text-slate-200">{inspectingUser.bio || 'No biography provided.'}</p>
+                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                          <span className="text-slate-500 font-bold uppercase block mb-1">Biography</span>
+                          <p className="text-slate-800">{inspectingUser.bio || 'No biography provided.'}</p>
                         </div>
 
-                        <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                          <span className="text-slate-400 font-bold uppercase block mb-2">Skills & Expertise</span>
+                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                          <span className="text-slate-500 font-bold uppercase block mb-2">Skills & Expertise</span>
                           <div className="flex flex-wrap gap-2">
                             {inspectingUser.skills && inspectingUser.skills.length > 0 ? (
                               inspectingUser.skills.map((sk, idx) => (
-                                <span key={idx} className="px-2.5 py-1 bg-slate-800 text-emerald-400 rounded-lg font-semibold">
+                                <span key={idx} className="px-2.5 py-1 bg-white border border-slate-200 text-emerald-700 rounded-lg font-semibold shadow-2xs">
                                   {sk}
                                 </span>
                               ))
                             ) : (
-                              <span className="text-slate-500">No skills listed</span>
+                              <span className="text-slate-400">No skills listed</span>
                             )}
                           </div>
                         </div>
 
-                        <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 flex justify-between items-center">
-                          <span className="text-slate-400">Account Joined Date</span>
-                          <span className="font-mono text-white">{inspectingUser.createdAt || '2025-01-15'}</span>
+                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex justify-between items-center">
+                          <span className="text-slate-500">Account Joined Date</span>
+                          <span className="font-mono text-slate-900 font-semibold">{inspectingUser.createdAt || '2025-01-15'}</span>
                         </div>
                       </div>
                     )}
@@ -2057,12 +2115,12 @@ export default function App() {
                     {userActivityTab === 'gigs' && (
                       <div className="space-y-3 max-h-60 overflow-y-auto">
                         {gigs.filter(g => g.freelancerId === inspectingUser.id || g.freelancerName === inspectingUser.name).map(g => (
-                          <div key={g.id} className="p-4 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between text-xs">
+                          <div key={g.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between text-xs">
                             <div>
-                              <span className="font-bold text-white block mb-0.5">{g.title}</span>
-                              <span className="text-slate-400">{g.category} · Status: <strong className="text-emerald-400">{g.status}</strong></span>
+                              <span className="font-bold text-slate-900 block mb-0.5">{g.title}</span>
+                              <span className="text-slate-500">{g.category} · Status: <strong className="text-emerald-700">{g.status}</strong></span>
                             </div>
-                            <span className="font-extrabold text-white text-sm">₹{(g.price * 83).toLocaleString()}</span>
+                            <span className="font-extrabold text-slate-900 text-sm">₹{(g.price * 83).toLocaleString()}</span>
                           </div>
                         ))}
                       </div>
@@ -2072,12 +2130,12 @@ export default function App() {
                     {userActivityTab === 'projects' && (
                       <div className="space-y-3 max-h-60 overflow-y-auto">
                         {projects.filter(p => p.buyerId === inspectingUser.id || p.buyerName === inspectingUser.name).map(p => (
-                          <div key={p.id} className="p-4 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between text-xs">
+                          <div key={p.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between text-xs">
                             <div>
-                              <span className="font-bold text-white block mb-0.5">{p.title}</span>
-                              <span className="text-slate-400">Budget: ${p.budgetMin} - ${p.budgetMax} · Status: <strong className="text-emerald-400">{p.status}</strong></span>
+                              <span className="font-bold text-slate-900 block mb-0.5">{p.title}</span>
+                              <span className="text-slate-500">Budget: ${p.budgetMin} - ${p.budgetMax} · Status: <strong className="text-emerald-700">{p.status}</strong></span>
                             </div>
-                            <span className="text-slate-400 font-mono">{p.createdAt}</span>
+                            <span className="text-slate-500 font-mono">{p.createdAt}</span>
                           </div>
                         ))}
                       </div>
@@ -2087,12 +2145,12 @@ export default function App() {
                     {userActivityTab === 'proposals' && (
                       <div className="space-y-3 max-h-60 overflow-y-auto">
                         {proposals.filter(p => p.freelancerId === inspectingUser.id).map(p => (
-                          <div key={p.id} className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-2 text-xs">
+                          <div key={p.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2 text-xs">
                             <div className="flex justify-between items-center">
-                              <span className="font-bold text-white">Bid Amount: ${p.bidAmount} ({p.deliveryDays} Days)</span>
-                              <span className="text-emerald-400 font-bold uppercase">{p.status}</span>
+                              <span className="font-bold text-slate-900">Bid Amount: ${p.bidAmount} ({p.deliveryDays} Days)</span>
+                              <span className="text-emerald-700 font-bold uppercase">{p.status}</span>
                             </div>
-                            <p className="text-slate-300 italic bg-slate-900 p-2.5 rounded-xl border border-slate-800">{p.coverLetter}</p>
+                            <p className="text-slate-700 italic bg-white p-2.5 rounded-xl border border-slate-200">{p.coverLetter}</p>
                           </div>
                         ))}
                       </div>
@@ -2102,14 +2160,14 @@ export default function App() {
                     {userActivityTab === 'orders' && (
                       <div className="space-y-3 max-h-60 overflow-y-auto">
                         {orders.filter(o => o.buyerId === inspectingUser.id || o.sellerId === inspectingUser.id).map(o => (
-                          <div key={o.id} className="p-4 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between text-xs">
+                          <div key={o.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between text-xs">
                             <div>
-                              <span className="font-bold text-white block mb-0.5">{o.title}</span>
-                              <span className="text-slate-400">Order #{o.id} · Status: <strong className="text-emerald-400">{o.status}</strong></span>
+                              <span className="font-bold text-slate-900 block mb-0.5">{o.title}</span>
+                              <span className="text-slate-500">Order #{o.id} · Status: <strong className="text-emerald-700">{o.status}</strong></span>
                             </div>
                             <div className="text-right">
-                              <span className="font-extrabold text-white text-sm block">${o.amount}</span>
-                              <span className="text-[10px] text-emerald-400 font-semibold">14-Day Escrow Vault</span>
+                              <span className="font-extrabold text-slate-900 text-sm block">${o.amount}</span>
+                              <span className="text-[10px] text-emerald-700 font-semibold">14-Day Escrow Vault</span>
                             </div>
                           </div>
                         ))}
@@ -2120,12 +2178,12 @@ export default function App() {
                     {userActivityTab === 'reviews' && (
                       <div className="space-y-3 max-h-60 overflow-y-auto">
                         {reviews.filter(r => r.targetUserId === inspectingUser.id).map(r => (
-                          <div key={r.id} className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-1 text-xs">
+                          <div key={r.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-1 text-xs">
                             <div className="flex justify-between items-center">
-                              <span className="font-bold text-white">{r.reviewerName} (Rating: {r.rating} ★)</span>
+                              <span className="font-bold text-slate-900">{r.reviewerName} (Rating: {r.rating} ★)</span>
                               <span className="text-slate-500">{r.createdAt}</span>
                             </div>
-                            <p className="text-slate-300">{r.comment}</p>
+                            <p className="text-slate-700">{r.comment}</p>
                           </div>
                         ))}
                       </div>
@@ -2135,10 +2193,10 @@ export default function App() {
                     {userActivityTab === 'tickets' && (
                       <div className="space-y-3 max-h-60 overflow-y-auto">
                         {supportTickets.filter(t => t.userId === inspectingUser.id).map(t => (
-                          <div key={t.id} className="p-4 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between text-xs">
+                          <div key={t.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between text-xs">
                             <div>
-                              <span className="font-bold text-white block mb-0.5">{t.subject}</span>
-                              <span className="text-slate-400">Priority: {t.priority} · Status: {t.status}</span>
+                              <span className="font-bold text-slate-900 block mb-0.5">{t.subject}</span>
+                              <span className="text-slate-500">Priority: {t.priority} · Status: {t.status}</span>
                             </div>
                             <span className="text-slate-500">{t.createdAt}</span>
                           </div>
@@ -2151,13 +2209,13 @@ export default function App() {
 
               {/* EDIT USER MODAL */}
               {editingUser && (
-                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-xl w-full space-y-5 text-slate-200">
-                    <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-                      <h3 className="text-lg font-bold text-white">Edit User Profile — {editingUser.name}</h3>
+                <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-xl w-full space-y-5 text-slate-800 shadow-2xl">
+                    <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                      <h3 className="text-lg font-bold text-slate-900">Edit User Profile — {editingUser.name}</h3>
                       <button 
                         onClick={() => setEditingUser(null)}
-                        className="text-slate-400 hover:text-white text-xs font-bold"
+                        className="text-slate-400 hover:text-slate-700 text-xs font-bold cursor-pointer"
                       >
                         Cancel
                       </button>
@@ -2166,34 +2224,34 @@ export default function App() {
                     <form onSubmit={handleSaveEditUser} className="space-y-4 text-xs">
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">Full Name</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">Full Name</label>
                           <input 
                             type="text" 
                             value={editUserForm.name}
                             onChange={(e) => setEditUserForm(prev => ({ ...prev, name: e.target.value }))}
                             required
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500 font-medium"
                           />
                         </div>
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">Email Address</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">Email Address</label>
                           <input 
                             type="email" 
                             value={editUserForm.email}
                             onChange={(e) => setEditUserForm(prev => ({ ...prev, email: e.target.value }))}
                             required
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500 font-mono"
                           />
                         </div>
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">System Role</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">System Role</label>
                           <select 
                             value={editUserForm.role}
                             onChange={(e) => setEditUserForm(prev => ({ ...prev, role: e.target.value }))}
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500"
                           >
                             <option value="user">Marketplace User</option>
                             <option value="super_admin">Super Admin</option>
@@ -2202,11 +2260,11 @@ export default function App() {
                           </select>
                         </div>
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">Account Status</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">Account Status</label>
                           <select 
                             value={editUserForm.status}
                             onChange={(e) => setEditUserForm(prev => ({ ...prev, status: e.target.value }))}
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500"
                           >
                             <option value="active">Active</option>
                             <option value="suspended">Suspended</option>
@@ -2216,63 +2274,63 @@ export default function App() {
                       </div>
 
                       <div>
-                        <label className="block text-slate-400 font-bold uppercase mb-1">Professional Title</label>
+                        <label className="block text-slate-700 font-bold uppercase mb-1">Professional Title</label>
                         <input 
                           type="text" 
                           value={editUserForm.title}
                           onChange={(e) => setEditUserForm(prev => ({ ...prev, title: e.target.value }))}
-                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-slate-400 font-bold uppercase mb-1">Bio / Profile Summary</label>
+                        <label className="block text-slate-700 font-bold uppercase mb-1">Bio / Profile Summary</label>
                         <textarea 
                           rows={3}
                           value={editUserForm.bio}
                           onChange={(e) => setEditUserForm(prev => ({ ...prev, bio: e.target.value }))}
-                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-slate-400 font-bold uppercase mb-1">Skills (comma separated)</label>
+                        <label className="block text-slate-700 font-bold uppercase mb-1">Skills (comma separated)</label>
                         <input 
                           type="text" 
                           value={editUserForm.skills}
                           onChange={(e) => setEditUserForm(prev => ({ ...prev, skills: e.target.value }))}
-                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500"
                         />
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">Hourly Rate ($/hr)</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">Hourly Rate ($/hr)</label>
                           <input 
                             type="number" 
                             value={editUserForm.hourlyRate}
                             onChange={(e) => setEditUserForm(prev => ({ ...prev, hourlyRate: Number(e.target.value) }))}
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500 font-mono"
                           />
                         </div>
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">Wallet Balance ($)</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">Wallet Balance ($)</label>
                           <input 
                             type="number" 
                             value={editUserForm.walletBalance}
                             onChange={(e) => setEditUserForm(prev => ({ ...prev, walletBalance: Number(e.target.value) }))}
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500 font-mono"
                           />
                         </div>
                       </div>
 
                       <div className="pt-2">
-                        <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-300">
+                        <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
                           <input 
                             type="checkbox" 
                             checked={editUserForm.verified}
                             onChange={(e) => setEditUserForm(prev => ({ ...prev, verified: e.target.checked }))}
-                            className="rounded border-slate-800 bg-slate-950 text-emerald-500 focus:ring-emerald-500 w-4 h-4"
+                            className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
                           />
                           <span>Verified User Badge Active</span>
                         </label>
@@ -2282,13 +2340,13 @@ export default function App() {
                         <button 
                           type="button"
                           onClick={() => setEditingUser(null)}
-                          className="px-4 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl hover:bg-slate-700"
+                          className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 cursor-pointer"
                         >
                           Cancel
                         </button>
                         <button 
                           type="submit"
-                          className="px-5 py-2 bg-emerald-500 text-slate-950 font-bold rounded-xl hover:bg-emerald-400"
+                          className="px-5 py-2 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-sm cursor-pointer"
                         >
                           Save User Changes
                         </button>
@@ -2304,17 +2362,17 @@ export default function App() {
           {adminTab === 'projects' && (
             <div className="space-y-6">
               {/* Filter & Control Header */}
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-4">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4 shadow-xs">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
                   <div>
-                    <h3 className="text-base font-bold text-white flex items-center gap-2">
-                      <Briefcase className="w-5 h-5 text-emerald-400" />
+                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <Briefcase className="w-5 h-5 text-emerald-600" />
                       <span>Projects & Buyer Requests Management</span>
                     </h3>
-                    <p className="text-xs text-slate-400 mt-0.5">Manage, search, filter, edit, publish, unpublish, suspend, restore, feature, and moderate buyer RFPs.</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Manage, search, filter, edit, publish, unpublish, suspend, restore, feature, and moderate buyer RFPs.</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400 font-mono bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
+                    <span className="text-xs text-slate-700 font-mono bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 font-medium">
                       {projects.length} Total Projects
                     </span>
                   </div>
@@ -2324,13 +2382,13 @@ export default function App() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {/* Search */}
                   <div className="relative">
-                    <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                     <input 
                       type="text" 
                       placeholder="Search title, buyer, description..." 
                       value={projectSearchQuery}
                       onChange={(e) => setProjectSearchQuery(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                      className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-emerald-500"
                     />
                   </div>
 
@@ -2339,7 +2397,7 @@ export default function App() {
                     <select 
                       value={projectStatusFilter}
                       onChange={(e) => setProjectStatusFilter(e.target.value as any)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500"
                     >
                       <option value="all">All Statuses</option>
                       <option value="open">Open / Active</option>
@@ -2356,7 +2414,7 @@ export default function App() {
                     <select 
                       value={projectCategoryFilter}
                       onChange={(e) => setProjectCategoryFilter(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500"
                     >
                       <option value="all">All Categories</option>
                       {categories.map(c => (
@@ -2370,7 +2428,7 @@ export default function App() {
                     <select 
                       value={projectFeaturedFilter}
                       onChange={(e) => setProjectFeaturedFilter(e.target.value as any)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500"
                     >
                       <option value="all">All Listing Types</option>
                       <option value="featured">Featured Projects Only ★</option>
@@ -2381,11 +2439,11 @@ export default function App() {
               </div>
 
               {/* Projects Table */}
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6">
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="bg-slate-900 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                      <tr className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200">
                         <th className="p-4">Project & Buyer</th>
                         <th className="p-4">Category & Subcategory</th>
                         <th className="p-4">Budget & Deadline</th>
@@ -2395,58 +2453,58 @@ export default function App() {
                         <th className="p-4 text-right">Admin Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800/60 text-xs text-slate-300">
+                    <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
                       {projects
                         .filter(p => {
                           const q = projectSearchQuery.toLowerCase();
                           const matchesSearch = !q || 
                             p.title.toLowerCase().includes(q) || 
-                            p.description.toLowerCase().includes(q) ||
-                            p.buyerName.toLowerCase().includes(q) ||
+                            p.description.toLowerCase().includes(q) || 
+                            p.buyerName.toLowerCase().includes(q) || 
                             p.category.toLowerCase().includes(q);
                           const matchesStatus = projectStatusFilter === 'all' || p.status === projectStatusFilter;
                           const matchesCat = projectCategoryFilter === 'all' || p.category === projectCategoryFilter;
                           const matchesFeatured = projectFeaturedFilter === 'all' || 
-                            (projectFeaturedFilter === 'featured' && p.featured) ||
+                            (projectFeaturedFilter === 'featured' && p.featured) || 
                             (projectFeaturedFilter === 'regular' && !p.featured);
                           return matchesSearch && matchesStatus && matchesCat && matchesFeatured;
                         })
                         .map(p => (
-                          <tr key={p.id} className="hover:bg-slate-900/50 transition-colors">
+                          <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
                             <td className="p-4">
                               <div className="flex items-center gap-3">
-                                <img src={p.buyerAvatar} className="w-10 h-10 rounded-full object-cover ring-2 ring-slate-800" />
+                                <img src={p.buyerAvatar} className="w-10 h-10 rounded-full object-cover ring-2 ring-slate-200" />
                                 <div>
                                   <div className="flex items-center gap-1.5">
-                                    <span className="font-bold text-white text-sm hover:text-emerald-400 cursor-pointer" onClick={() => setViewingProject(p)}>{p.title}</span>
+                                    <span className="font-bold text-slate-900 text-sm hover:text-emerald-600 cursor-pointer" onClick={() => setViewingProject(p)}>{p.title}</span>
                                     {p.featured && (
-                                      <span className="bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold">★ Featured</span>
+                                      <span className="bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded text-[10px] font-bold">★ Featured</span>
                                     )}
                                   </div>
-                                  <span className="text-[11px] text-slate-400">Buyer: {p.buyerName} · Posted {p.createdAt}</span>
+                                  <span className="text-[11px] text-slate-500">Buyer: {p.buyerName} · Posted {p.createdAt}</span>
                                 </div>
                               </div>
                             </td>
                             <td className="p-4">
-                              <span className="font-semibold text-slate-200 block">{p.category}</span>
-                              <span className="text-[11px] text-slate-400">{p.subcategory || 'General'}</span>
+                              <span className="font-semibold text-slate-900 block">{p.category}</span>
+                              <span className="text-[11px] text-slate-500">{p.subcategory || 'General'}</span>
                             </td>
                             <td className="p-4">
-                              <span className="font-extrabold text-emerald-400 block">${p.budgetMin.toLocaleString()} - ${p.budgetMax.toLocaleString()}</span>
-                              <span className="text-[11px] text-slate-400">{p.deadlineDays} Days Delivery</span>
+                              <span className="font-extrabold text-emerald-600 block">${p.budgetMin.toLocaleString()} - ${p.budgetMax.toLocaleString()}</span>
+                              <span className="text-[11px] text-slate-500">{p.deadlineDays} Days Delivery</span>
                             </td>
                             <td className="p-4">
-                              <span className="px-2.5 py-1 bg-slate-900 border border-slate-800 rounded-lg text-indigo-300 font-bold font-mono">
+                              <span className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-indigo-700 font-bold font-mono">
                                 {p.proposalsCount} bids
                               </span>
                             </td>
                             <td className="p-4">
                               <button 
                                 onClick={() => handleToggleProjectFeature(p.id)}
-                                className={`px-2.5 py-1 rounded-lg font-bold text-[10px] uppercase border transition-colors ${
+                                className={`px-2.5 py-1 rounded-lg font-bold text-[10px] uppercase border transition-colors cursor-pointer ${
                                   p.featured 
-                                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30' 
-                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'
+                                    ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100' 
+                                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                                 }`}
                               >
                                 {p.featured ? '★ Featured' : '+ Feature'}
@@ -2454,10 +2512,10 @@ export default function App() {
                             </td>
                             <td className="p-4">
                               <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase border ${
-                                p.status === 'open' || p.status === 'published' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                                p.status === 'suspended' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
-                                p.status === 'unpublished' ? 'bg-slate-800 text-slate-400 border-slate-700' :
-                                'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
+                                p.status === 'open' || p.status === 'published' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                p.status === 'suspended' ? 'bg-red-50 text-red-700 border-red-200' :
+                                p.status === 'unpublished' ? 'bg-slate-100 text-slate-600 border-slate-200' :
+                                'bg-indigo-50 text-indigo-700 border-indigo-200'
                               }`}>
                                 {p.status}
                               </span>
@@ -2466,20 +2524,20 @@ export default function App() {
                               {/* View Details */}
                               <button 
                                 onClick={() => setViewingProject(p)}
-                                className="px-2.5 py-1.5 bg-slate-800 text-slate-200 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 transition-colors inline-flex items-center gap-1 text-[11px]"
+                                className="px-2.5 py-1.5 bg-slate-50 text-slate-700 border border-slate-200 font-bold rounded-lg hover:bg-slate-100 transition-colors inline-flex items-center gap-1 text-[11px] cursor-pointer"
                                 title="View full project details"
                               >
-                                <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                                <Eye className="w-3.5 h-3.5 text-emerald-600" />
                                 <span>View</span>
                               </button>
 
                               {/* Edit */}
                               <button 
                                 onClick={() => handleOpenEditProjectModal(p)}
-                                className="px-2.5 py-1.5 bg-slate-800 text-slate-200 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 transition-colors inline-flex items-center gap-1 text-[11px]"
+                                className="px-2.5 py-1.5 bg-slate-50 text-slate-700 border border-slate-200 font-bold rounded-lg hover:bg-slate-100 transition-colors inline-flex items-center gap-1 text-[11px] cursor-pointer"
                                 title="Edit project title, category, budget"
                               >
-                                <Settings className="w-3.5 h-3.5 text-indigo-400" />
+                                <Settings className="w-3.5 h-3.5 text-indigo-600" />
                                 <span>Edit</span>
                               </button>
 
@@ -2487,14 +2545,14 @@ export default function App() {
                               {p.status === 'unpublished' ? (
                                 <button 
                                   onClick={() => handleUpdateProjectStatus(p.id, 'open')}
-                                  className="px-2.5 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold rounded-lg hover:bg-emerald-500/20 text-[11px]"
+                                  className="px-2.5 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold rounded-lg hover:bg-emerald-100 text-[11px] cursor-pointer"
                                 >
                                   Publish
                                 </button>
                               ) : p.status === 'open' || p.status === 'published' ? (
                                 <button 
                                   onClick={() => handleUpdateProjectStatus(p.id, 'unpublished')}
-                                  className="px-2.5 py-1.5 bg-slate-800 text-slate-300 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 text-[11px]"
+                                  className="px-2.5 py-1.5 bg-slate-100 text-slate-700 border border-slate-200 font-bold rounded-lg hover:bg-slate-200 text-[11px] cursor-pointer"
                                 >
                                   Unpublish
                                 </button>
@@ -2504,14 +2562,14 @@ export default function App() {
                               {p.status === 'suspended' ? (
                                 <button 
                                   onClick={() => handleUpdateProjectStatus(p.id, 'open')}
-                                  className="px-2.5 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold rounded-lg hover:bg-emerald-500/20 text-[11px]"
+                                  className="px-2.5 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold rounded-lg hover:bg-emerald-100 text-[11px] cursor-pointer"
                                 >
                                   Restore
                                 </button>
                               ) : (
                                 <button 
                                   onClick={() => handleUpdateProjectStatus(p.id, 'suspended')}
-                                  className="px-2.5 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 font-bold rounded-lg hover:bg-red-500/20 text-[11px]"
+                                  className="px-2.5 py-1.5 bg-red-50 text-red-700 border border-red-200 font-bold rounded-lg hover:bg-red-100 text-[11px] cursor-pointer"
                                 >
                                   Suspend
                                 </button>
@@ -2520,7 +2578,7 @@ export default function App() {
                               {/* Moderate */}
                               <button 
                                 onClick={() => handleOpenModerationModal(p)}
-                                className="px-2.5 py-1.5 bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold rounded-lg hover:bg-purple-500/30 text-[11px]"
+                                className="px-2.5 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 font-bold rounded-lg hover:bg-purple-100 text-[11px] cursor-pointer"
                               >
                                 Moderate
                               </button>
@@ -2528,7 +2586,7 @@ export default function App() {
                               {/* Delete */}
                               <button 
                                 onClick={() => handleDeleteProject(p.id)}
-                                className="px-2 py-1.5 bg-red-950/40 text-red-400 border border-red-900/50 font-bold rounded-lg hover:bg-red-900/50 text-[11px]"
+                                className="px-2 py-1.5 bg-red-50 text-red-700 border border-red-200 font-bold rounded-lg hover:bg-red-100 text-[11px] cursor-pointer"
                                 title="Delete Project"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -2543,65 +2601,65 @@ export default function App() {
 
               {/* VIEW PROJECT DETAILS MODAL */}
               {viewingProject && (
-                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-3xl w-full space-y-6 max-h-[90vh] overflow-y-auto text-slate-200">
-                    <div className="flex items-start justify-between pb-4 border-b border-slate-800">
+                <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-3xl w-full space-y-6 max-h-[90vh] overflow-y-auto text-slate-800 shadow-2xl">
+                    <div className="flex items-start justify-between pb-4 border-b border-slate-100">
                       <div>
                         <div className="flex items-center gap-2">
-                          <h3 className="text-xl font-extrabold text-white">{viewingProject.title}</h3>
+                          <h3 className="text-xl font-extrabold text-slate-900">{viewingProject.title}</h3>
                           {viewingProject.featured && (
-                            <span className="bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded text-xs font-bold">★ Featured</span>
+                            <span className="bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded text-xs font-bold">★ Featured</span>
                           )}
                         </div>
-                        <p className="text-xs text-slate-400 mt-1">Project ID: #{viewingProject.id} · Category: <span className="text-emerald-400 font-semibold">{viewingProject.category} ({viewingProject.subcategory || 'General'})</span></p>
+                        <p className="text-xs text-slate-500 mt-1">Project ID: #{viewingProject.id} · Category: <span className="text-emerald-700 font-semibold">{viewingProject.category} ({viewingProject.subcategory || 'General'})</span></p>
                       </div>
                       <button 
                         onClick={() => setViewingProject(null)}
-                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl"
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer"
                       >
                         Close
                       </button>
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                      <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center">
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Budget Range</span>
-                        <span className="text-base font-extrabold text-emerald-400">${viewingProject.budgetMin} - ${viewingProject.budgetMax}</span>
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Budget Range</span>
+                        <span className="text-base font-extrabold text-emerald-700">${viewingProject.budgetMin} - ${viewingProject.budgetMax}</span>
                       </div>
-                      <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center">
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Deadline</span>
-                        <span className="text-base font-extrabold text-white">{viewingProject.deadlineDays} Days</span>
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Deadline</span>
+                        <span className="text-base font-extrabold text-slate-900">{viewingProject.deadlineDays} Days</span>
                       </div>
-                      <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center">
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Status</span>
-                        <span className="text-base font-extrabold text-indigo-400 uppercase">{viewingProject.status}</span>
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Status</span>
+                        <span className="text-base font-extrabold text-indigo-700 uppercase">{viewingProject.status}</span>
                       </div>
-                      <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center">
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Bids Received</span>
-                        <span className="text-base font-extrabold text-purple-400">{viewingProject.proposalsCount}</span>
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Bids Received</span>
+                        <span className="text-base font-extrabold text-purple-700">{viewingProject.proposalsCount}</span>
                       </div>
                     </div>
 
-                    <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-2">
-                      <h4 className="text-xs font-bold text-slate-400 uppercase">Project Brief & Description</h4>
-                      <p className="text-xs text-slate-200 leading-relaxed whitespace-pre-wrap">{viewingProject.description}</p>
+                    <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-2">
+                      <h4 className="text-xs font-bold text-slate-500 uppercase">Project Brief & Description</h4>
+                      <p className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap">{viewingProject.description}</p>
                     </div>
 
-                    <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 flex items-center justify-between">
+                    <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <img src={viewingProject.buyerAvatar} className="w-10 h-10 rounded-full object-cover ring-2 ring-emerald-500/30" />
                         <div>
-                          <span className="text-xs font-bold text-white block">{viewingProject.buyerName}</span>
-                          <span className="text-[11px] text-slate-400">Buyer ID: {viewingProject.buyerId}</span>
+                          <span className="text-xs font-bold text-slate-900 block">{viewingProject.buyerName}</span>
+                          <span className="text-[11px] text-slate-500 font-mono">Buyer ID: {viewingProject.buyerId}</span>
                         </div>
                       </div>
-                      <span className="text-xs text-slate-500">Created: {viewingProject.createdAt}</span>
+                      <span className="text-xs text-slate-400 font-mono">Created: {viewingProject.createdAt}</span>
                     </div>
 
                     {viewingProject.moderationNotes && (
-                      <div className="bg-purple-950/30 border border-purple-800/50 p-4 rounded-2xl text-xs space-y-1">
-                        <span className="font-bold text-purple-300 block">Moderation Log Notes:</span>
-                        <p className="text-slate-300">{viewingProject.moderationNotes}</p>
+                      <div className="bg-purple-50 border border-purple-200 p-4 rounded-2xl text-xs space-y-1">
+                        <span className="font-bold text-purple-800 block">Moderation Log Notes:</span>
+                        <p className="text-slate-700">{viewingProject.moderationNotes}</p>
                       </div>
                     )}
                   </div>
@@ -2610,13 +2668,13 @@ export default function App() {
 
               {/* EDIT PROJECT MODAL */}
               {editingProject && (
-                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-xl w-full space-y-5 text-slate-200">
-                    <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-                      <h3 className="text-lg font-bold text-white">Edit Project — {editingProject.title}</h3>
+                <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-xl w-full space-y-5 text-slate-800 shadow-2xl">
+                    <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                      <h3 className="text-lg font-bold text-slate-900">Edit Project — {editingProject.title}</h3>
                       <button 
                         onClick={() => setEditingProject(null)}
-                        className="text-slate-400 hover:text-white text-xs font-bold"
+                        className="text-slate-400 hover:text-slate-700 text-xs font-bold cursor-pointer"
                       >
                         Cancel
                       </button>
@@ -2624,23 +2682,23 @@ export default function App() {
 
                     <form onSubmit={handleSaveEditProject} className="space-y-4 text-xs">
                       <div>
-                        <label className="block text-slate-400 font-bold uppercase mb-1">Project Title</label>
+                        <label className="block text-slate-700 font-bold uppercase mb-1">Project Title</label>
                         <input 
                           type="text" 
                           value={editProjectForm.title}
                           onChange={(e) => setEditProjectForm(prev => ({ ...prev, title: e.target.value }))}
                           required
-                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500 font-medium"
                         />
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">Category</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">Category</label>
                           <select 
                             value={editProjectForm.category}
                             onChange={(e) => setEditProjectForm(prev => ({ ...prev, category: e.target.value }))}
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500"
                           >
                             {categories.map(c => (
                               <option key={c.id} value={c.name}>{c.name}</option>
@@ -2648,52 +2706,52 @@ export default function App() {
                           </select>
                         </div>
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">Subcategory</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">Subcategory</label>
                           <input 
                             type="text" 
                             value={editProjectForm.subcategory}
                             onChange={(e) => setEditProjectForm(prev => ({ ...prev, subcategory: e.target.value }))}
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500"
                           />
                         </div>
                       </div>
 
                       <div className="grid grid-cols-3 gap-3">
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">Budget Min ($)</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">Budget Min ($)</label>
                           <input 
                             type="number" 
                             value={editProjectForm.budgetMin}
                             onChange={(e) => setEditProjectForm(prev => ({ ...prev, budgetMin: Number(e.target.value) }))}
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500 font-mono"
                           />
                         </div>
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">Budget Max ($)</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">Budget Max ($)</label>
                           <input 
                             type="number" 
                             value={editProjectForm.budgetMax}
                             onChange={(e) => setEditProjectForm(prev => ({ ...prev, budgetMax: Number(e.target.value) }))}
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500 font-mono"
                           />
                         </div>
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">Deadline (Days)</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">Deadline (Days)</label>
                           <input 
                             type="number" 
                             value={editProjectForm.deadlineDays}
                             onChange={(e) => setEditProjectForm(prev => ({ ...prev, deadlineDays: Number(e.target.value) }))}
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500 font-mono"
                           />
                         </div>
                       </div>
 
                       <div>
-                        <label className="block text-slate-400 font-bold uppercase mb-1">Project Status</label>
+                        <label className="block text-slate-700 font-bold uppercase mb-1">Project Status</label>
                         <select 
                           value={editProjectForm.status}
                           onChange={(e) => setEditProjectForm(prev => ({ ...prev, status: e.target.value as any }))}
-                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500"
                         >
                           <option value="open">Open</option>
                           <option value="published">Published</option>
@@ -2705,22 +2763,22 @@ export default function App() {
                       </div>
 
                       <div>
-                        <label className="block text-slate-400 font-bold uppercase mb-1">Project Description</label>
+                        <label className="block text-slate-700 font-bold uppercase mb-1">Project Description</label>
                         <textarea 
                           rows={4}
                           value={editProjectForm.description}
                           onChange={(e) => setEditProjectForm(prev => ({ ...prev, description: e.target.value }))}
-                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500"
                         />
                       </div>
 
                       <div className="pt-2">
-                        <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-300">
+                        <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
                           <input 
                             type="checkbox" 
                             checked={editProjectForm.featured}
                             onChange={(e) => setEditProjectForm(prev => ({ ...prev, featured: e.target.checked }))}
-                            className="rounded border-slate-800 bg-slate-950 text-emerald-500 focus:ring-emerald-500 w-4 h-4"
+                            className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
                           />
                           <span>Feature Project on Homepage & Listings</span>
                         </label>
@@ -2730,13 +2788,13 @@ export default function App() {
                         <button 
                           type="button"
                           onClick={() => setEditingProject(null)}
-                          className="px-4 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl hover:bg-slate-700"
+                          className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 cursor-pointer"
                         >
                           Cancel
                         </button>
                         <button 
                           type="submit"
-                          className="px-5 py-2 bg-emerald-500 text-slate-950 font-bold rounded-xl hover:bg-emerald-400"
+                          className="px-5 py-2 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-sm cursor-pointer"
                         >
                           Save Project
                         </button>
@@ -2748,13 +2806,13 @@ export default function App() {
 
               {/* MODERATE PROJECT MODAL */}
               {moderatingProject && (
-                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full space-y-5 text-slate-200">
-                    <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-                      <h3 className="text-lg font-bold text-white">Moderate Project — #{moderatingProject.id}</h3>
+                <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-lg w-full space-y-5 text-slate-800 shadow-2xl">
+                    <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                      <h3 className="text-lg font-bold text-slate-900">Moderate Project — #{moderatingProject.id}</h3>
                       <button 
                         onClick={() => setModeratingProject(null)}
-                        className="text-slate-400 hover:text-white text-xs font-bold"
+                        className="text-slate-400 hover:text-slate-700 text-xs font-bold cursor-pointer"
                       >
                         Cancel
                       </button>
@@ -2762,16 +2820,16 @@ export default function App() {
 
                     <form onSubmit={handleSaveModeration} className="space-y-4 text-xs">
                       <div>
-                        <span className="text-slate-400 block font-bold mb-1">Project Title:</span>
-                        <span className="text-white font-extrabold text-sm block">{moderatingProject.title}</span>
+                        <span className="text-slate-500 block font-bold mb-1">Project Title:</span>
+                        <span className="text-slate-900 font-extrabold text-sm block">{moderatingProject.title}</span>
                       </div>
 
                       <div>
-                        <label className="block text-slate-400 font-bold uppercase mb-1">Moderation Verdict</label>
+                        <label className="block text-slate-700 font-bold uppercase mb-1">Moderation Verdict</label>
                         <select 
                           value={moderationStatus}
                           onChange={(e) => setModerationStatus(e.target.value as any)}
-                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500"
                         >
                           <option value="approved">✓ Approved (Complies with Policy)</option>
                           <option value="flagged">⚠ Flagged for Safety Review</option>
@@ -2781,13 +2839,13 @@ export default function App() {
                       </div>
 
                       <div>
-                        <label className="block text-slate-400 font-bold uppercase mb-1">Moderation Review Notes</label>
+                        <label className="block text-slate-700 font-bold uppercase mb-1">Moderation Review Notes</label>
                         <textarea 
                           rows={3}
                           placeholder="Provide details regarding policy compliance, safety checks, or rationale..."
                           value={moderationNotes}
                           onChange={(e) => setModerationNotes(e.target.value)}
-                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500"
                         />
                       </div>
 
@@ -2795,13 +2853,13 @@ export default function App() {
                         <button 
                           type="button"
                           onClick={() => setModeratingProject(null)}
-                          className="px-4 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl hover:bg-slate-700"
+                          className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 cursor-pointer"
                         >
                           Cancel
                         </button>
                         <button 
                           type="submit"
-                          className="px-5 py-2 bg-purple-500 text-white font-bold rounded-xl hover:bg-purple-400"
+                          className="px-5 py-2 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 shadow-sm cursor-pointer"
                         >
                           Save Moderation Verdict
                         </button>
@@ -2813,21 +2871,21 @@ export default function App() {
             </div>
           )}
 
-          {/* MODULE 4: SERVICES / GIGS */}
+          {/* MODULE 4: FREELANCER GIGS & SERVICES MANAGEMENT */}
           {adminTab === 'gigs' && (
             <div className="space-y-6">
               {/* Filter & Control Header */}
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-4">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4 shadow-xs">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
                   <div>
-                    <h3 className="text-base font-bold text-white flex items-center gap-2">
-                      <Layers className="w-5 h-5 text-emerald-400" />
+                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <Layers className="w-5 h-5 text-emerald-600" />
                       <span>Freelancer Services & Gigs Management</span>
                     </h3>
-                    <p className="text-xs text-slate-400 mt-0.5">Manage, moderate, search, filter, edit, publish, unpublish, suspend, restore, feature, and audit freelancer services.</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Manage, moderate, search, filter, edit, publish, unpublish, suspend, restore, feature, and audit freelancer services.</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400 font-mono bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
+                    <span className="text-xs text-slate-600 font-mono bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
                       {gigs.length} Total Services Listed
                     </span>
                   </div>
@@ -2837,13 +2895,13 @@ export default function App() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {/* Search */}
                   <div className="relative">
-                    <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                     <input 
                       type="text" 
                       placeholder="Search title, freelancer, desc..." 
                       value={gigSearchQuery}
                       onChange={(e) => setGigSearchQuery(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                      className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors"
                     />
                   </div>
 
@@ -2852,7 +2910,7 @@ export default function App() {
                     <select 
                       value={gigStatusFilter}
                       onChange={(e) => setGigStatusFilter(e.target.value as any)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-emerald-500 focus:bg-white"
                     >
                       <option value="all">All Statuses</option>
                       <option value="published">Published</option>
@@ -2866,7 +2924,7 @@ export default function App() {
                     <select 
                       value={gigCategoryFilter}
                       onChange={(e) => setGigCategoryFilter(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-emerald-500 focus:bg-white"
                     >
                       <option value="all">All Categories</option>
                       {categories.map(c => (
@@ -2880,7 +2938,7 @@ export default function App() {
                     <select 
                       value={gigFeaturedFilter}
                       onChange={(e) => setGigFeaturedFilter(e.target.value as any)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-emerald-500 focus:bg-white"
                     >
                       <option value="all">All Listing Types</option>
                       <option value="featured">Featured Gigs ★</option>
@@ -2891,11 +2949,11 @@ export default function App() {
               </div>
 
               {/* Gigs Grid/List */}
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6">
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="bg-slate-900 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                      <tr className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">
                         <th className="p-4">Service & Freelancer</th>
                         <th className="p-4">Category</th>
                         <th className="p-4">Starting Price & Delivery</th>
@@ -2905,7 +2963,7 @@ export default function App() {
                         <th className="p-4 text-right">Admin Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800/60 text-xs text-slate-300">
+                    <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
                       {gigs
                         .filter(g => {
                           const q = gigSearchQuery.toLowerCase();
@@ -2922,36 +2980,36 @@ export default function App() {
                           return matchesSearch && matchesStatus && matchesCat && matchesFeatured;
                         })
                         .map(g => (
-                          <tr key={g.id} className="hover:bg-slate-900/50 transition-colors">
+                          <tr key={g.id} className="hover:bg-slate-50/70 transition-colors">
                             <td className="p-4">
                               <div className="flex items-center gap-3">
-                                <img src={g.image || 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=800&h=500&fit=crop'} className="w-12 h-12 rounded-xl object-cover ring-2 ring-slate-800 shrink-0" />
+                                <img src={g.image || 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=800&h=500&fit=crop'} className="w-12 h-12 rounded-xl object-cover ring-1 ring-slate-200 shrink-0" />
                                 <div>
                                   <div className="flex items-center gap-1.5">
-                                    <span className="font-bold text-white text-sm hover:text-emerald-400 cursor-pointer" onClick={() => setViewingGig(g)}>{g.title}</span>
+                                    <span className="font-bold text-slate-900 text-sm hover:text-emerald-600 cursor-pointer" onClick={() => setViewingGig(g)}>{g.title}</span>
                                     {g.featured && (
-                                      <span className="bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold">★ Featured</span>
+                                      <span className="bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded text-[10px] font-bold">★ Featured</span>
                                     )}
                                   </div>
-                                  <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-1">
-                                    <img src={g.freelancerAvatar} className="w-4 h-4 rounded-full object-cover" />
+                                  <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-1">
+                                    <img src={g.freelancerAvatar} className="w-4 h-4 rounded-full object-cover ring-1 ring-slate-200" />
                                     <span>{g.freelancerName} ({g.freelancerLevel || 'Freelancer'})</span>
                                   </div>
                                 </div>
                               </div>
                             </td>
                             <td className="p-4">
-                              <span className="font-semibold text-slate-200 block">{g.category}</span>
-                              <span className="text-[11px] text-slate-400">{g.subcategory || 'General'}</span>
+                              <span className="font-semibold text-slate-900 block">{g.category}</span>
+                              <span className="text-[11px] text-slate-500">{g.subcategory || 'General'}</span>
                             </td>
                             <td className="p-4">
-                              <span className="font-extrabold text-emerald-400 block">${g.price.toLocaleString()}</span>
-                              <span className="text-[11px] text-slate-400">{g.deliveryDays} Days Delivery</span>
+                              <span className="font-extrabold text-emerald-600 block">${g.price.toLocaleString()}</span>
+                              <span className="text-[11px] text-slate-500">{g.deliveryDays} Days Delivery</span>
                             </td>
                             <td className="p-4">
                               <div className="flex items-center gap-1">
-                                <span className="font-bold text-amber-400 font-mono">★ {g.rating || 5.0}</span>
-                                <span className="text-slate-500">({g.reviewsCount || 0})</span>
+                                <span className="font-bold text-amber-500 font-mono">★ {g.rating || 5.0}</span>
+                                <span className="text-slate-400">({g.reviewsCount || 0})</span>
                               </div>
                             </td>
                             <td className="p-4">
@@ -2959,8 +3017,8 @@ export default function App() {
                                 onClick={() => handleToggleGigFeature(g.id)}
                                 className={`px-2.5 py-1 rounded-lg font-bold text-[10px] uppercase border transition-colors ${
                                   g.featured 
-                                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30' 
-                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'
+                                    ? 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100' 
+                                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                                 }`}
                               >
                                 {g.featured ? '★ Featured' : '+ Feature'}
@@ -2968,9 +3026,9 @@ export default function App() {
                             </td>
                             <td className="p-4">
                               <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase border ${
-                                g.status === 'published' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                                g.status === 'suspended' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
-                                'bg-slate-800 text-slate-400 border-slate-700'
+                                g.status === 'published' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                g.status === 'suspended' ? 'bg-red-50 text-red-700 border-red-200' :
+                                'bg-slate-100 text-slate-600 border-slate-200'
                               }`}>
                                 {g.status}
                               </span>
@@ -2979,20 +3037,20 @@ export default function App() {
                               {/* View Details */}
                               <button 
                                 onClick={() => setViewingGig(g)}
-                                className="px-2 py-1.5 bg-slate-800 text-slate-200 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 transition-colors inline-flex items-center gap-1 text-[11px]"
+                                className="px-2 py-1.5 bg-slate-50 text-slate-700 border border-slate-200 font-bold rounded-lg hover:bg-slate-100 transition-colors inline-flex items-center gap-1 text-[11px]"
                                 title="Inspect Service"
                               >
-                                <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                                <Eye className="w-3.5 h-3.5 text-emerald-600" />
                                 <span>View</span>
                               </button>
 
                               {/* Edit */}
                               <button 
                                 onClick={() => handleOpenEditGigModal(g)}
-                                className="px-2 py-1.5 bg-slate-800 text-slate-200 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 transition-colors inline-flex items-center gap-1 text-[11px]"
+                                className="px-2 py-1.5 bg-slate-50 text-slate-700 border border-slate-200 font-bold rounded-lg hover:bg-slate-100 transition-colors inline-flex items-center gap-1 text-[11px]"
                                 title="Edit Service details"
                               >
-                                <Settings className="w-3.5 h-3.5 text-indigo-400" />
+                                <Settings className="w-3.5 h-3.5 text-indigo-600" />
                                 <span>Edit</span>
                               </button>
 
@@ -3000,14 +3058,14 @@ export default function App() {
                               {g.status === 'draft' ? (
                                 <button 
                                   onClick={() => handleUpdateGigStatus(g.id, 'published')}
-                                  className="px-2 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold rounded-lg hover:bg-emerald-500/20 text-[11px]"
+                                  className="px-2 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold rounded-lg hover:bg-emerald-100 text-[11px]"
                                 >
                                   Publish
                                 </button>
                               ) : g.status === 'published' ? (
                                 <button 
                                   onClick={() => handleUpdateGigStatus(g.id, 'draft')}
-                                  className="px-2 py-1.5 bg-slate-800 text-slate-300 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 text-[11px]"
+                                  className="px-2 py-1.5 bg-slate-50 text-slate-600 border border-slate-200 font-bold rounded-lg hover:bg-slate-100 text-[11px]"
                                 >
                                   Unpublish
                                 </button>
@@ -3017,14 +3075,14 @@ export default function App() {
                               {g.status === 'suspended' ? (
                                 <button 
                                   onClick={() => handleUpdateGigStatus(g.id, 'published')}
-                                  className="px-2 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold rounded-lg hover:bg-emerald-500/20 text-[11px]"
+                                  className="px-2 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold rounded-lg hover:bg-emerald-100 text-[11px]"
                                 >
                                   Restore
                                 </button>
                               ) : (
                                 <button 
                                   onClick={() => handleUpdateGigStatus(g.id, 'suspended')}
-                                  className="px-2 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 font-bold rounded-lg hover:bg-red-500/20 text-[11px]"
+                                  className="px-2 py-1.5 bg-red-50 text-red-700 border border-red-200 font-bold rounded-lg hover:bg-red-100 text-[11px]"
                                 >
                                   Suspend
                                 </button>
@@ -3033,7 +3091,7 @@ export default function App() {
                               {/* Moderate */}
                               <button 
                                 onClick={() => handleOpenGigModerationModal(g)}
-                                className="px-2 py-1.5 bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold rounded-lg hover:bg-purple-500/30 text-[11px]"
+                                className="px-2 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 font-bold rounded-lg hover:bg-purple-100 text-[11px]"
                               >
                                 Moderate
                               </button>
@@ -3041,7 +3099,7 @@ export default function App() {
                               {/* Delete */}
                               <button 
                                 onClick={() => handleDeleteGig(g.id)}
-                                className="px-2 py-1.5 bg-red-950/40 text-red-400 border border-red-900/50 font-bold rounded-lg hover:bg-red-900/50 text-[11px] inline-flex items-center gap-1"
+                                className="px-2 py-1.5 bg-red-50 text-red-700 border border-red-200 font-bold rounded-lg hover:bg-red-100 text-[11px] inline-flex items-center gap-1"
                                 title="Delete Gig permanently"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -3057,21 +3115,21 @@ export default function App() {
 
               {/* INSPECT GIG DETAILS MODAL */}
               {viewingGig && (
-                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-3xl w-full space-y-6 max-h-[90vh] overflow-y-auto text-slate-200">
-                    <div className="flex items-start justify-between pb-4 border-b border-slate-800">
+                <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-3xl w-full space-y-6 max-h-[90vh] overflow-y-auto text-slate-800 shadow-2xl">
+                    <div className="flex items-start justify-between pb-4 border-b border-slate-100">
                       <div>
                         <div className="flex items-center gap-2">
-                          <h3 className="text-xl font-extrabold text-white">{viewingGig.title}</h3>
+                          <h3 className="text-xl font-extrabold text-slate-900">{viewingGig.title}</h3>
                           {viewingGig.featured && (
-                            <span className="bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded text-xs font-bold">★ Featured</span>
+                            <span className="bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded text-xs font-bold">★ Featured</span>
                           )}
                         </div>
-                        <p className="text-xs text-slate-400 mt-1">Gig ID: #{viewingGig.id} · Category: <span className="text-emerald-400 font-semibold">{viewingGig.category} ({viewingGig.subcategory || 'General'})</span></p>
+                        <p className="text-xs text-slate-500 mt-1">Gig ID: #{viewingGig.id} · Category: <span className="text-emerald-600 font-semibold">{viewingGig.category} ({viewingGig.subcategory || 'General'})</span></p>
                       </div>
                       <button 
                         onClick={() => setViewingGig(null)}
-                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl"
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl"
                       >
                         Close
                       </button>
@@ -3081,38 +3139,38 @@ export default function App() {
                       <div className="space-y-4">
                         <img 
                           src={viewingGig.image || 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=800&h=500&fit=crop'} 
-                          className="w-full h-48 rounded-2xl object-cover border border-slate-800 shadow-inner" 
+                          className="w-full h-48 rounded-2xl object-cover border border-slate-200 shadow-xs" 
                         />
                         <div className="grid grid-cols-3 gap-2">
-                          <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
-                            <span className="text-[9px] text-slate-400 uppercase font-bold block">Starting Price</span>
-                            <span className="text-sm font-extrabold text-emerald-400">${viewingGig.price}</span>
+                          <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
+                            <span className="text-[9px] text-slate-500 uppercase font-bold block">Starting Price</span>
+                            <span className="text-sm font-extrabold text-emerald-600">${viewingGig.price}</span>
                           </div>
-                          <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
-                            <span className="text-[9px] text-slate-400 uppercase font-bold block">Delivery Time</span>
-                            <span className="text-sm font-extrabold text-white">{viewingGig.deliveryDays} Days</span>
+                          <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
+                            <span className="text-[9px] text-slate-500 uppercase font-bold block">Delivery Time</span>
+                            <span className="text-sm font-extrabold text-slate-900">{viewingGig.deliveryDays} Days</span>
                           </div>
-                          <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
-                            <span className="text-[9px] text-slate-400 uppercase font-bold block">Rating</span>
-                            <span className="text-sm font-extrabold text-amber-400">★ {viewingGig.rating || 5.0}</span>
+                          <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
+                            <span className="text-[9px] text-slate-500 uppercase font-bold block">Rating</span>
+                            <span className="text-sm font-extrabold text-amber-500">★ {viewingGig.rating || 5.0}</span>
                           </div>
                         </div>
                       </div>
 
                       <div className="space-y-4">
-                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1">
-                          <span className="text-[10px] text-slate-400 uppercase font-bold block">Gig Description</span>
-                          <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{viewingGig.description}</p>
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
+                          <span className="text-[10px] text-slate-500 uppercase font-bold block">Gig Description</span>
+                          <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap">{viewingGig.description}</p>
                         </div>
 
                         {viewingGig.extras && viewingGig.extras.length > 0 && (
-                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                            <span className="text-[10px] text-slate-400 uppercase font-bold block mb-2">Gig Upgrades & Extras</span>
+                          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                            <span className="text-[10px] text-slate-500 uppercase font-bold block mb-2">Gig Upgrades & Extras</span>
                             <div className="space-y-2">
                               {viewingGig.extras.map(e => (
-                                <div key={e.id} className="flex justify-between items-center text-xs bg-slate-900 px-3 py-2 rounded-lg border border-slate-800">
-                                  <span className="text-slate-200">{e.title}</span>
-                                  <span className="font-bold text-emerald-400">+${e.price}</span>
+                                <div key={e.id} className="flex justify-between items-center text-xs bg-white px-3 py-2 rounded-lg border border-slate-200">
+                                  <span className="text-slate-800">{e.title}</span>
+                                  <span className="font-bold text-emerald-600">+${e.price}</span>
                                 </div>
                               ))}
                             </div>
@@ -3121,25 +3179,25 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 flex items-center justify-between">
+                    <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <img src={viewingGig.freelancerAvatar} className="w-10 h-10 rounded-full object-cover ring-2 ring-emerald-500/30" />
+                        <img src={viewingGig.freelancerAvatar} className="w-10 h-10 rounded-full object-cover ring-2 ring-emerald-500/20" />
                         <div>
-                          <span className="text-xs font-bold text-white block">{viewingGig.freelancerName}</span>
-                          <span className="text-[11px] text-slate-400">Freelancer ID: {viewingGig.freelancerId} · Level: {viewingGig.freelancerLevel || 'Pro'}</span>
+                          <span className="text-xs font-bold text-slate-900 block">{viewingGig.freelancerName}</span>
+                          <span className="text-[11px] text-slate-500">Freelancer ID: {viewingGig.freelancerId} · Level: {viewingGig.freelancerLevel || 'Pro'}</span>
                         </div>
                       </div>
                       <span className="text-xs text-slate-500">Moderation: {viewingGig.moderationStatus || 'Pending review'}</span>
                     </div>
 
                     {viewingGig.moderationNotes && (
-                      <div className="bg-purple-950/30 border border-purple-800/50 p-4 rounded-2xl text-xs space-y-1">
-                        <span className="font-bold text-purple-300 block">Moderation Log Notes:</span>
-                        <p className="text-slate-300">{viewingGig.moderationNotes}</p>
+                      <div className="bg-purple-50 border border-purple-200 p-4 rounded-2xl text-xs space-y-1">
+                        <span className="font-bold text-purple-700 block">Moderation Log Notes:</span>
+                        <p className="text-purple-900">{viewingGig.moderationNotes}</p>
                       </div>
                     )}
 
-                    <div className="flex justify-between items-center pt-4 border-t border-slate-800">
+                    <div className="flex justify-between items-center pt-4 border-t border-slate-100">
                       <button 
                         onClick={() => {
                           if (viewingGig) {
@@ -3147,7 +3205,7 @@ export default function App() {
                             setViewingGig(null);
                           }
                         }}
-                        className="px-4 py-2 bg-red-950/40 text-red-400 border border-red-900/50 hover:bg-red-900/50 font-bold rounded-xl flex items-center gap-1.5 text-xs transition-colors"
+                        className="px-4 py-2 bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 font-bold rounded-xl flex items-center gap-1.5 text-xs transition-colors"
                       >
                         <Trash2 className="w-4 h-4" />
                         <span>Delete Service</span>
@@ -3159,14 +3217,14 @@ export default function App() {
                             setViewingGig(null);
                             handleOpenEditGigModal(g);
                           }}
-                          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-indigo-400 border border-slate-700 font-bold rounded-xl flex items-center gap-1 text-xs transition-colors"
+                          className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold rounded-xl flex items-center gap-1 text-xs transition-colors"
                         >
                           <Settings className="w-4 h-4" />
                           <span>Edit Details</span>
                         </button>
                         <button 
                           onClick={() => setViewingGig(null)}
-                          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-colors"
+                          className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors"
                         >
                           Close
                         </button>
@@ -3178,13 +3236,13 @@ export default function App() {
 
               {/* EDIT GIG DETAILS MODAL */}
               {editingGig && (
-                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-xl w-full space-y-5 text-slate-200">
-                    <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-                      <h3 className="text-lg font-bold text-white">Edit Service — {editingGig.title}</h3>
+                <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-xl w-full space-y-5 text-slate-800 shadow-2xl">
+                    <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                      <h3 className="text-lg font-bold text-slate-900">Edit Service — {editingGig.title}</h3>
                       <button 
                         onClick={() => setEditingGig(null)}
-                        className="text-slate-400 hover:text-white text-xs font-bold"
+                        className="text-slate-400 hover:text-slate-700 text-xs font-bold"
                       >
                         Cancel
                       </button>
@@ -3192,23 +3250,23 @@ export default function App() {
 
                     <form onSubmit={handleSaveEditGig} className="space-y-4 text-xs">
                       <div>
-                        <label className="block text-slate-400 font-bold uppercase mb-1">Service / Gig Title</label>
+                        <label className="block text-slate-700 font-bold uppercase mb-1">Service / Gig Title</label>
                         <input 
                           type="text" 
                           value={editGigForm.title}
                           onChange={(e) => setEditGigForm(prev => ({ ...prev, title: e.target.value }))}
                           required
-                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                         />
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">Category</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">Category</label>
                           <select 
                             value={editGigForm.category}
                             onChange={(e) => setEditGigForm(prev => ({ ...prev, category: e.target.value }))}
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                           >
                             {categories.map(c => (
                               <option key={c.id} value={c.name}>{c.name}</option>
@@ -3216,41 +3274,41 @@ export default function App() {
                           </select>
                         </div>
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">Subcategory</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">Subcategory</label>
                           <input 
                             type="text" 
                             value={editGigForm.subcategory}
                             onChange={(e) => setEditGigForm(prev => ({ ...prev, subcategory: e.target.value }))}
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                           />
                         </div>
                       </div>
 
                       <div className="grid grid-cols-3 gap-3">
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">Base Price ($)</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">Base Price ($)</label>
                           <input 
                             type="number" 
                             value={editGigForm.price}
                             onChange={(e) => setEditGigForm(prev => ({ ...prev, price: Number(e.target.value) }))}
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                           />
                         </div>
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">Delivery Time (Days)</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">Delivery Time (Days)</label>
                           <input 
                             type="number" 
                             value={editGigForm.deliveryDays}
                             onChange={(e) => setEditGigForm(prev => ({ ...prev, deliveryDays: Number(e.target.value) }))}
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                           />
                         </div>
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">Status</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">Status</label>
                           <select 
                             value={editGigForm.status}
                             onChange={(e) => setEditGigForm(prev => ({ ...prev, status: e.target.value as any }))}
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                           >
                             <option value="published">Published</option>
                             <option value="draft">Draft</option>
@@ -3260,28 +3318,28 @@ export default function App() {
                       </div>
 
                       <div>
-                        <label className="block text-slate-400 font-bold uppercase mb-1">Description</label>
+                        <label className="block text-slate-700 font-bold uppercase mb-1">Description</label>
                         <textarea 
                           rows={4}
                           value={editGigForm.description}
                           onChange={(e) => setEditGigForm(prev => ({ ...prev, description: e.target.value }))}
-                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                         />
                       </div>
 
                       <div className="pt-2">
-                        <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-300">
+                        <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
                           <input 
                             type="checkbox" 
                             checked={editGigForm.featured}
                             onChange={(e) => setEditGigForm(prev => ({ ...prev, featured: e.target.checked }))}
-                            className="rounded border-slate-800 bg-slate-950 text-emerald-500 focus:ring-emerald-500 w-4 h-4"
+                            className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4"
                           />
                           <span>Feature Gig on Homepage & Listings</span>
                         </label>
                       </div>
 
-                      <div className="pt-4 flex items-center justify-between border-t border-slate-800">
+                      <div className="pt-4 flex items-center justify-between border-t border-slate-100">
                         <button 
                           type="button"
                           onClick={() => {
@@ -3290,7 +3348,7 @@ export default function App() {
                               setEditingGig(null);
                             }
                           }}
-                          className="px-4 py-2 bg-red-950/40 text-red-400 border border-red-900/50 hover:bg-red-900/50 font-bold rounded-xl flex items-center gap-1.5 text-xs transition-colors"
+                          className="px-4 py-2 bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 font-bold rounded-xl flex items-center gap-1.5 text-xs transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />
                           <span>Delete Service</span>
@@ -3299,13 +3357,13 @@ export default function App() {
                           <button 
                             type="button"
                             onClick={() => setEditingGig(null)}
-                            className="px-4 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl hover:bg-slate-700 text-xs"
+                            className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 text-xs"
                           >
                             Cancel
                           </button>
                           <button 
                             type="submit"
-                            className="px-5 py-2 bg-emerald-500 text-slate-950 font-bold rounded-xl hover:bg-emerald-400 text-xs"
+                            className="px-5 py-2 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-500 text-xs shadow-xs"
                           >
                             Save Gig Details
                           </button>
@@ -3318,13 +3376,13 @@ export default function App() {
 
               {/* MODERATE GIG MODAL */}
               {moderatingGig && (
-                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full space-y-5 text-slate-200">
-                    <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-                      <h3 className="text-lg font-bold text-white">Moderate Service / Gig</h3>
+                <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-lg w-full space-y-5 text-slate-800 shadow-2xl">
+                    <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                      <h3 className="text-lg font-bold text-slate-900">Moderate Service / Gig</h3>
                       <button 
                         onClick={() => setModeratingGig(null)}
-                        className="text-slate-400 hover:text-white text-xs font-bold"
+                        className="text-slate-400 hover:text-slate-700 text-xs font-bold"
                       >
                         Cancel
                       </button>
@@ -3332,16 +3390,16 @@ export default function App() {
 
                     <form onSubmit={handleSaveGigModeration} className="space-y-4 text-xs">
                       <div>
-                        <span className="text-slate-400 block font-bold mb-1">Gig Title:</span>
-                        <span className="text-white font-extrabold text-sm block">{moderatingGig.title}</span>
+                        <span className="text-slate-500 block font-bold mb-1">Gig Title:</span>
+                        <span className="text-slate-900 font-extrabold text-sm block">{moderatingGig.title}</span>
                       </div>
 
                       <div>
-                        <label className="block text-slate-400 font-bold uppercase mb-1">Moderation Verdict</label>
+                        <label className="block text-slate-700 font-bold uppercase mb-1">Moderation Verdict</label>
                         <select 
                           value={gigModerationStatus}
                           onChange={(e) => setGigModerationStatus(e.target.value as any)}
-                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                         >
                           <option value="approved">✓ Approved (Complies with Policy)</option>
                           <option value="flagged">⚠ Flagged for Policy Warning</option>
@@ -3351,13 +3409,13 @@ export default function App() {
                       </div>
 
                       <div>
-                        <label className="block text-slate-400 font-bold uppercase mb-1">Moderation Review Notes</label>
+                        <label className="block text-slate-700 font-bold uppercase mb-1">Moderation Review Notes</label>
                         <textarea 
                           rows={3}
                           placeholder="Provide rationales, warning notes, or feedback for the seller..."
                           value={gigModerationNotes}
                           onChange={(e) => setGigModerationNotes(e.target.value)}
-                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                         />
                       </div>
 
@@ -3365,13 +3423,13 @@ export default function App() {
                         <button 
                           type="button"
                           onClick={() => setModeratingGig(null)}
-                          className="px-4 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl hover:bg-slate-700"
+                          className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200"
                         >
                           Cancel
                         </button>
                         <button 
                           type="submit"
-                          className="px-5 py-2 bg-purple-500 text-white font-bold rounded-xl hover:bg-purple-400"
+                          className="px-5 py-2 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-500 shadow-xs"
                         >
                           Save Moderation Verdict
                         </button>
@@ -3387,9 +3445,9 @@ export default function App() {
           {adminTab === 'categories' && (
             <div className="space-y-6">
               {/* Add New Category Box */}
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6">
-                <h3 className="text-base font-bold text-white mb-2">Add New Parent Category</h3>
-                <p className="text-xs text-slate-400 mb-4">Create top-level marketplace categories with clean search-engine friendly slugs.</p>
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs">
+                <h3 className="text-base font-bold text-slate-900 mb-2">Add New Parent Category</h3>
+                <p className="text-xs text-slate-500 mb-4">Create top-level marketplace categories with clean search-engine friendly slugs.</p>
                 <form onSubmit={handleAddCategory} className="flex flex-col sm:flex-row items-center gap-3">
                   <input 
                     type="text" 
@@ -3397,18 +3455,18 @@ export default function App() {
                     value={newCategoryName}
                     onChange={(e) => setNewCategoryName(e.target.value)}
                     required
-                    className="flex-1 px-4 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 w-full"
+                    className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white w-full"
                   />
                   <input 
                     type="text" 
                     placeholder="Slug (optional e.g. writing-translation)..." 
                     value={newCategorySlug}
                     onChange={(e) => setNewCategorySlug(e.target.value)}
-                    className="flex-1 px-4 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 w-full"
+                    className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white w-full"
                   />
                   <button 
                     type="submit" 
-                    className="px-5 py-2.5 bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs hover:bg-emerald-400 transition-colors whitespace-nowrap w-full sm:w-auto flex items-center justify-center gap-1.5"
+                    className="px-5 py-2.5 bg-emerald-600 text-white font-bold rounded-xl text-xs hover:bg-emerald-500 transition-colors whitespace-nowrap w-full sm:w-auto flex items-center justify-center gap-1.5 shadow-xs"
                   >
                     <PlusCircle className="w-4 h-4" />
                     <span>Create Category</span>
@@ -3417,24 +3475,24 @@ export default function App() {
               </div>
 
               {/* Categories & Subcategories Directory */}
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-6 shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
                   <div>
-                    <h3 className="text-base font-bold text-white">Categories & Subcategories Directory</h3>
-                    <p className="text-xs text-slate-400">Edit titles, manage slugs, toggle status (ON/OFF), or bulk delete categories.</p>
+                    <h3 className="text-base font-bold text-slate-900">Categories & Subcategories Directory</h3>
+                    <p className="text-xs text-slate-500">Edit titles, manage slugs, toggle status (ON/OFF), or bulk delete categories.</p>
                   </div>
 
                   <div className="flex items-center gap-3">
                     {(selectedCatIds.length > 0 || selectedSubPairs.length > 0) && (
                       <button 
                         onClick={handleBulkDeleteCategories}
-                        className="px-4 py-2 bg-red-600 text-white font-bold text-xs rounded-xl hover:bg-red-500 transition-colors shadow-md flex items-center gap-1.5"
+                        className="px-4 py-2 bg-red-600 text-white font-bold text-xs rounded-xl hover:bg-red-500 transition-colors shadow-xs flex items-center gap-1.5"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                         <span>Bulk Delete Selected ({selectedCatIds.length + selectedSubPairs.length})</span>
                       </button>
                     )}
-                    <span className="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20">
+                    <span className="text-xs font-mono text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200">
                       {categories.length} Categories Total
                     </span>
                   </div>
@@ -3446,9 +3504,9 @@ export default function App() {
                     const isCatSelected = selectedCatIds.includes(cat.id);
 
                     return (
-                      <div key={cat.id} className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
+                      <div key={cat.id} className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
                         {/* Parent Category Header */}
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200/80">
                           <div className="flex items-center gap-3 flex-1">
                             <input 
                               type="checkbox"
@@ -3460,7 +3518,7 @@ export default function App() {
                                   setSelectedCatIds(prev => prev.filter(id => id !== cat.id));
                                 }
                               }}
-                              className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-emerald-500"
+                              className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                             />
 
                             {isEditingThisCat ? (
@@ -3469,31 +3527,31 @@ export default function App() {
                                   type="text" 
                                   value={editCatName} 
                                   onChange={(e) => setEditCatName(e.target.value)} 
-                                  className="px-3 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-xs text-white"
+                                  className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900"
                                 />
                                 <input 
                                   type="text" 
                                   value={editCatSlug} 
                                   onChange={(e) => setEditCatSlug(e.target.value)} 
-                                  className="px-3 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-xs text-emerald-400 font-mono"
+                                  className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-emerald-600 font-mono"
                                 />
                                 <button 
                                   onClick={() => handleUpdateCategory(cat.id)}
-                                  className="px-3 py-1.5 bg-emerald-500 text-slate-950 font-bold rounded-lg text-xs hover:bg-emerald-400"
+                                  className="px-3 py-1.5 bg-emerald-600 text-white font-bold rounded-lg text-xs hover:bg-emerald-500"
                                 >
                                   Save
                                 </button>
                                 <button 
                                   onClick={() => setEditingCatId(null)}
-                                  className="px-3 py-1.5 bg-slate-800 text-slate-300 font-bold rounded-lg text-xs hover:bg-slate-700"
+                                  className="px-3 py-1.5 bg-slate-200 text-slate-700 font-bold rounded-lg text-xs hover:bg-slate-300"
                                 >
                                   Cancel
                                 </button>
                               </div>
                             ) : (
                               <div className="flex items-center gap-3">
-                                <span className="text-sm font-bold text-white">{cat.name}</span>
-                                <span className="text-xs text-emerald-400 font-mono bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                                <span className="text-sm font-bold text-slate-900">{cat.name}</span>
+                                <span className="text-xs text-emerald-700 font-mono bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                                   /categories/{cat.slug}
                                 </span>
                               </div>
@@ -3505,7 +3563,7 @@ export default function App() {
                               {/* On/Off Toggle Button */}
                               <button 
                                 onClick={() => handleToggleCategory(cat.id)}
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold uppercase transition-colors ${cat.enabled !== false ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-500 border border-slate-700'}`}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold uppercase transition-colors ${cat.enabled !== false ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-slate-200 text-slate-500 border border-slate-300'}`}
                               >
                                 {cat.enabled !== false ? '● ON' : '○ OFF'}
                               </button>
@@ -3516,13 +3574,13 @@ export default function App() {
                                   setEditCatName(cat.name);
                                   setEditCatSlug(cat.slug);
                                 }}
-                                className="px-3 py-1.5 bg-slate-800 text-slate-300 hover:text-white font-bold rounded-lg text-xs hover:bg-slate-700 transition-colors"
+                                className="px-3 py-1.5 bg-white text-slate-700 hover:text-slate-900 border border-slate-200 font-bold rounded-lg text-xs hover:bg-slate-100 transition-colors"
                               >
                                 Edit Category
                               </button>
                               <button 
                                 onClick={() => handleDeleteCategory(cat.id, cat.name)}
-                                className="px-3 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 font-bold rounded-lg text-xs hover:bg-red-500/20 transition-colors flex items-center gap-1"
+                                className="px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 font-bold rounded-lg text-xs hover:bg-red-100 transition-colors flex items-center gap-1"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                                 <span>Delete</span>
@@ -3534,13 +3592,13 @@ export default function App() {
                         {/* Subcategories List */}
                         <div className="pl-4 space-y-2">
                           <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Subcategories</span>
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Subcategories</span>
                             <button 
                               onClick={() => {
                                 setAddingSubForCatId(addingSubForCatId === cat.id ? null : cat.id);
                                 setNewSubcategoryName('');
                               }}
-                              className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+                              className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
                             >
                               <PlusCircle className="w-3.5 h-3.5" />
                               <span>+ Add Subcategory</span>
@@ -3549,23 +3607,23 @@ export default function App() {
 
                           {/* Add subcategory inline input */}
                           {addingSubForCatId === cat.id && (
-                            <div className="flex items-center gap-2 mb-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                            <div className="flex items-center gap-2 mb-3 bg-white p-2.5 rounded-xl border border-slate-200">
                               <input 
                                 type="text" 
                                 placeholder="Subcategory name (e.g. Logo Design)..." 
                                 value={newSubcategoryName}
                                 onChange={(e) => setNewSubcategoryName(e.target.value)}
-                                className="flex-1 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:outline-none"
+                                className="flex-1 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none"
                               />
                               <button 
                                 onClick={() => handleAddSubcategory(cat.id)}
-                                className="px-3 py-1.5 bg-emerald-500 text-slate-950 font-bold text-xs rounded-lg hover:bg-emerald-400"
+                                className="px-3 py-1.5 bg-emerald-600 text-white font-bold text-xs rounded-lg hover:bg-emerald-500"
                               >
                                 Add
                               </button>
                               <button 
                                 onClick={() => setAddingSubForCatId(null)}
-                                className="px-3 py-1.5 bg-slate-800 text-slate-400 text-xs rounded-lg hover:bg-slate-700"
+                                className="px-3 py-1.5 bg-slate-100 text-slate-600 text-xs rounded-lg hover:bg-slate-200"
                               >
                                 Cancel
                               </button>
@@ -3577,24 +3635,24 @@ export default function App() {
                             const isSubSelected = selectedSubPairs.some(p => p.catId === cat.id && p.subId === sub.id);
 
                             return (
-                              <div key={sub.id} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/60 text-xs">
+                              <div key={sub.id} className="flex items-center justify-between p-2.5 rounded-xl bg-white border border-slate-200 text-xs">
                                 {isEditingSub ? (
                                   <div className="flex items-center gap-2 flex-1">
                                     <input 
                                       type="text" 
-                                      value={editSubName}
-                                      onChange={(e) => setEditSubName(e.target.value)}
-                                      className="px-3 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-white"
+                                      value={editSubName} 
+                                      onChange={(e) => setEditSubName(e.target.value)} 
+                                      className="px-3 py-1 bg-slate-50 border border-slate-300 rounded text-xs text-slate-900"
                                     />
                                     <button 
                                       onClick={() => handleUpdateSubcategory(cat.id, sub.id)}
-                                      className="px-2.5 py-1 bg-emerald-500 text-slate-950 font-bold rounded text-xs"
+                                      className="px-2.5 py-1 bg-emerald-600 text-white font-bold rounded text-xs"
                                     >
                                       Save
                                     </button>
                                     <button 
                                       onClick={() => setEditingSubId(null)}
-                                      className="px-2.5 py-1 bg-slate-800 text-slate-400 rounded text-xs"
+                                      className="px-2.5 py-1 bg-slate-100 text-slate-600 rounded text-xs"
                                     >
                                       Cancel
                                     </button>
@@ -3612,17 +3670,17 @@ export default function App() {
                                             setSelectedSubPairs(prev => prev.filter(p => !(p.catId === cat.id && p.subId === sub.id)));
                                           }
                                         }}
-                                        className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                                        className="w-3.5 h-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                                       />
                                       <span className="text-slate-400">•</span>
-                                      <span className="font-semibold text-slate-200">{sub.name}</span>
+                                      <span className="font-semibold text-slate-900">{sub.name}</span>
                                       <span className="text-[11px] font-mono text-slate-500">(`/categories/${sub.slug}`)</span>
                                     </div>
                                     <div className="flex items-center gap-2">
                                       {/* Subcategory On/Off Toggle */}
                                       <button 
                                         onClick={() => handleToggleSubcategory(cat.id, sub.id)}
-                                        className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase transition-colors ${sub.enabled !== false ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-500 border border-slate-700'}`}
+                                        className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase transition-colors ${sub.enabled !== false ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}
                                       >
                                         {sub.enabled !== false ? 'ON' : 'OFF'}
                                       </button>
@@ -3631,13 +3689,13 @@ export default function App() {
                                           setEditingSubId({ catId: cat.id, subId: sub.id });
                                           setEditSubName(sub.name);
                                         }}
-                                        className="text-slate-400 hover:text-white font-semibold text-[11px]"
+                                        className="text-slate-500 hover:text-slate-900 font-semibold text-[11px]"
                                       >
                                         Edit
                                       </button>
                                       <button 
                                         onClick={() => handleDeleteSubcategory(cat.id, sub.id, sub.name)}
-                                        className="text-red-400 hover:text-red-300 font-semibold text-[11px]"
+                                        className="text-red-600 hover:text-red-700 font-semibold text-[11px]"
                                       >
                                         Delete
                                       </button>
@@ -3672,17 +3730,17 @@ export default function App() {
           {adminTab === 'proposals' && (
             <div className="space-y-6">
               {/* Filter & Control Header */}
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-4">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4 shadow-xs">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
                   <div>
-                    <h3 className="text-base font-bold text-white flex items-center gap-2">
-                      <FileText className="w-5 h-5 text-emerald-400" />
+                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-emerald-600" />
                       <span>Proposals & Bidding Management</span>
                     </h3>
-                    <p className="text-xs text-slate-400 mt-0.5">Manage, search, filter, edit, approve, reject, or delete freelancer bids and project relationships.</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Manage, search, filter, edit, approve, reject, or delete freelancer bids and project relationships.</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400 font-mono bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
+                    <span className="text-xs text-slate-600 font-mono bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
                       {proposals.length} Total Bids / Proposals
                     </span>
                   </div>
@@ -3692,13 +3750,13 @@ export default function App() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {/* Search */}
                   <div className="relative">
-                    <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                     <input 
                       type="text" 
                       placeholder="Search freelancer, project, cover letter..." 
                       value={proposalSearchQuery}
                       onChange={(e) => setProposalSearchQuery(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                      className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:bg-white"
                     />
                   </div>
 
@@ -3707,7 +3765,7 @@ export default function App() {
                     <select 
                       value={proposalStatusFilter}
                       onChange={(e) => setProposalStatusFilter(e.target.value as any)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-emerald-500 focus:bg-white"
                     >
                       <option value="all">All Statuses</option>
                       <option value="pending">Pending</option>
@@ -3721,7 +3779,7 @@ export default function App() {
                     <select 
                       value={proposalSort}
                       onChange={(e) => setProposalSort(e.target.value as any)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-emerald-500 focus:bg-white"
                     >
                       <option value="newest">Sort: Newest First</option>
                       <option value="bid_high">Sort: Bid Amount High-Low</option>
@@ -3736,25 +3794,25 @@ export default function App() {
                       placeholder="Min $" 
                       value={proposalBidMinFilter}
                       onChange={(e) => setProposalBidMinFilter(e.target.value)}
-                      className="w-1/2 px-2.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                      className="w-1/2 px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:bg-white"
                     />
                     <input 
                       type="number" 
                       placeholder="Max $" 
                       value={proposalBidMaxFilter}
                       onChange={(e) => setProposalBidMaxFilter(e.target.value)}
-                      className="w-1/2 px-2.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                      className="w-1/2 px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:bg-white"
                     />
                   </div>
                 </div>
               </div>
 
               {/* Proposals Table */}
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6">
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="bg-slate-900 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                      <tr className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">
                         <th className="p-4">Freelancer</th>
                         <th className="p-4">Project / RFP Target</th>
                         <th className="p-4">Bid Amount & Delivery</th>
@@ -3763,7 +3821,7 @@ export default function App() {
                         <th className="p-4 text-right">Admin Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800/60 text-xs text-slate-300">
+                    <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
                       {proposals
                         .filter(p => {
                           const q = proposalSearchQuery.toLowerCase();
@@ -3789,60 +3847,60 @@ export default function App() {
                         .map(p => {
                           const proj = projects.find(projItem => projItem.id === p.projectId);
                           return (
-                            <tr key={p.id} className="hover:bg-slate-900/50 transition-colors">
+                            <tr key={p.id} className="hover:bg-slate-50/70 transition-colors">
                               <td className="p-4">
                                 <div className="flex items-center gap-3">
-                                  <img src={p.freelancerAvatar} className="w-10 h-10 rounded-full object-cover ring-2 ring-slate-800 shrink-0" />
+                                  <img src={p.freelancerAvatar} className="w-10 h-10 rounded-full object-cover ring-1 ring-slate-200 shrink-0" />
                                   <div>
-                                    <span className="font-bold text-white text-sm block">{p.freelancerName}</span>
-                                    <span className="text-[11px] text-slate-400 truncate max-w-[150px] block">{p.freelancerTitle}</span>
+                                    <span className="font-bold text-slate-900 text-sm block">{p.freelancerName}</span>
+                                    <span className="text-[11px] text-slate-500 truncate max-w-[150px] block">{p.freelancerTitle}</span>
                                   </div>
                                 </div>
                               </td>
                               <td className="p-4">
                                 {proj ? (
                                   <div>
-                                    <span className="font-semibold text-slate-200 block text-xs truncate max-w-[220px]">{proj.title}</span>
-                                    <span className="text-[10px] text-slate-400 font-mono block mt-0.5">Project ID: #{proj.id} · Buyer: {proj.buyerName}</span>
+                                    <span className="font-semibold text-slate-900 block text-xs truncate max-w-[220px]">{proj.title}</span>
+                                    <span className="text-[10px] text-slate-500 font-mono block mt-0.5">Project ID: #{proj.id} · Buyer: {proj.buyerName}</span>
                                   </div>
                                 ) : (
-                                  <span className="text-red-400 font-semibold">Unknown / Deleted Project</span>
+                                  <span className="text-red-600 font-semibold">Unknown / Deleted Project</span>
                                 )}
                               </td>
                               <td className="p-4">
-                                <span className="font-extrabold text-emerald-400 block text-sm">${p.bidAmount.toLocaleString()}</span>
-                                <span className="text-[11px] text-slate-400">{p.deliveryDays} Days Delivery</span>
+                                <span className="font-extrabold text-emerald-600 block text-sm">${p.bidAmount.toLocaleString()}</span>
+                                <span className="text-[11px] text-slate-500">{p.deliveryDays} Days Delivery</span>
                               </td>
                               <td className="p-4">
                                 <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase border ${
-                                  p.status === 'accepted' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                                  p.status === 'rejected' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
-                                  'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                                  p.status === 'accepted' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                  p.status === 'rejected' ? 'bg-red-50 text-red-700 border-red-200' :
+                                  'bg-amber-50 text-amber-700 border-amber-200'
                                 }`}>
                                   {p.status}
                                 </span>
                               </td>
-                              <td className="p-4 font-mono text-[11px] text-slate-400">
+                              <td className="p-4 font-mono text-[11px] text-slate-500">
                                 {p.createdAt || '2026-10-02'}
                               </td>
                               <td className="p-4 text-right space-x-1.5 whitespace-nowrap">
                                 {/* View Proposal Details */}
                                 <button 
                                   onClick={() => setViewingProposal(p)}
-                                  className="px-2.5 py-1.5 bg-slate-800 text-slate-200 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 transition-colors inline-flex items-center gap-1 text-[11px]"
+                                  className="px-2.5 py-1.5 bg-slate-50 text-slate-700 border border-slate-200 font-bold rounded-lg hover:bg-slate-100 transition-colors inline-flex items-center gap-1 text-[11px]"
                                   title="View complete cover letter & details"
                                 >
-                                  <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                                  <Eye className="w-3.5 h-3.5 text-emerald-600" />
                                   <span>View</span>
                                 </button>
 
                                 {/* Edit Proposal */}
                                 <button 
                                   onClick={() => handleOpenEditProposalModal(p)}
-                                  className="px-2.5 py-1.5 bg-slate-800 text-slate-200 border border-slate-700 font-bold rounded-lg hover:bg-slate-700 transition-colors inline-flex items-center gap-1 text-[11px]"
+                                  className="px-2.5 py-1.5 bg-slate-50 text-slate-700 border border-slate-200 font-bold rounded-lg hover:bg-slate-100 transition-colors inline-flex items-center gap-1 text-[11px]"
                                   title="Edit bid parameters"
                                 >
-                                  <Settings className="w-3.5 h-3.5 text-indigo-400" />
+                                  <Settings className="w-3.5 h-3.5 text-indigo-600" />
                                   <span>Edit</span>
                                 </button>
 
@@ -3850,7 +3908,7 @@ export default function App() {
                                 {p.status !== 'accepted' && (
                                   <button 
                                     onClick={() => handleUpdateProposalStatus(p.id, 'accepted')}
-                                    className="px-2.5 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold rounded-lg hover:bg-emerald-500/20 text-[11px]"
+                                    className="px-2.5 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold rounded-lg hover:bg-emerald-100 text-[11px]"
                                     title="Accept Proposal"
                                   >
                                     Accept
@@ -3861,7 +3919,7 @@ export default function App() {
                                 {p.status !== 'rejected' && (
                                   <button 
                                     onClick={() => handleUpdateProposalStatus(p.id, 'rejected')}
-                                    className="px-2.5 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 font-bold rounded-lg hover:bg-red-500/20 text-[11px]"
+                                    className="px-2.5 py-1.5 bg-red-50 text-red-700 border border-red-200 font-bold rounded-lg hover:bg-red-100 text-[11px]"
                                     title="Reject Proposal"
                                   >
                                     Reject
@@ -3871,7 +3929,7 @@ export default function App() {
                                 {/* Delete */}
                                 <button 
                                   onClick={() => handleDeleteProposal(p.id)}
-                                  className="px-2 py-1.5 bg-red-950/40 text-red-400 border border-red-900/50 font-bold rounded-lg hover:bg-red-900/50 text-[11px]"
+                                  className="px-2 py-1.5 bg-red-50 text-red-700 border border-red-200 font-bold rounded-lg hover:bg-red-100 text-[11px]"
                                   title="Delete Proposal"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -3882,7 +3940,7 @@ export default function App() {
                         })}
                       {proposals.length === 0 && (
                         <tr>
-                          <td colSpan={6} className="p-8 text-center text-slate-500">No proposals or bids recorded in the platform database.</td>
+                          <td colSpan={6} className="p-8 text-center text-slate-400">No proposals or bids recorded in the platform database.</td>
                         </tr>
                       )}
                     </tbody>
@@ -3892,63 +3950,63 @@ export default function App() {
 
               {/* VIEW PROPOSAL DETAILS MODAL */}
               {viewingProposal && (
-                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-2xl w-full space-y-6 max-h-[90vh] overflow-y-auto text-slate-200">
-                    <div className="flex items-start justify-between pb-4 border-b border-slate-800">
+                <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-2xl w-full space-y-6 max-h-[90vh] overflow-y-auto text-slate-800 shadow-2xl">
+                    <div className="flex items-start justify-between pb-4 border-b border-slate-100">
                       <div>
-                        <h3 className="text-lg font-bold text-white">Proposal #{viewingProposal.id} Details</h3>
-                        <p className="text-xs text-slate-400 mt-0.5">Submitted by <span className="text-emerald-400 font-semibold">{viewingProposal.freelancerName}</span></p>
+                        <h3 className="text-lg font-bold text-slate-900">Proposal #{viewingProposal.id} Details</h3>
+                        <p className="text-xs text-slate-500 mt-0.5">Submitted by <span className="text-emerald-600 font-semibold">{viewingProposal.freelancerName}</span></p>
                       </div>
                       <button 
                         onClick={() => setViewingProposal(null)}
-                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl"
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl"
                       >
                         Close
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-3 bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center text-xs">
+                    <div className="grid grid-cols-3 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center text-xs">
                       <div>
                         <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Bid Amount</span>
-                        <span className="text-lg font-extrabold text-emerald-400">${viewingProposal.bidAmount}</span>
+                        <span className="text-lg font-extrabold text-emerald-600">${viewingProposal.bidAmount}</span>
                       </div>
                       <div>
                         <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Delivery Time</span>
-                        <span className="text-lg font-extrabold text-white">{viewingProposal.deliveryDays} Days</span>
+                        <span className="text-lg font-extrabold text-slate-900">{viewingProposal.deliveryDays} Days</span>
                       </div>
                       <div>
                         <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Current Status</span>
-                        <span className="text-lg font-extrabold text-indigo-400 uppercase">{viewingProposal.status}</span>
+                        <span className="text-lg font-extrabold text-indigo-600 uppercase">{viewingProposal.status}</span>
                       </div>
                     </div>
 
                     {/* Freelancer Profile Shortcard */}
-                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center gap-3">
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex items-center gap-3">
                       <img src={viewingProposal.freelancerAvatar} className="w-12 h-12 rounded-full object-cover ring-2 ring-emerald-500/20 shrink-0" />
                       <div>
-                        <span className="text-sm font-bold text-white block">{viewingProposal.freelancerName}</span>
-                        <span className="text-xs text-slate-400">{viewingProposal.freelancerTitle}</span>
-                        <span className="text-[10px] text-slate-500 block mt-0.5">ID: {viewingProposal.freelancerId}</span>
+                        <span className="text-sm font-bold text-slate-900 block">{viewingProposal.freelancerName}</span>
+                        <span className="text-xs text-slate-500">{viewingProposal.freelancerTitle}</span>
+                        <span className="text-[10px] text-slate-400 block mt-0.5">ID: {viewingProposal.freelancerId}</span>
                       </div>
                     </div>
 
                     {/* Target Project Card */}
-                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase block mb-1.5">Project / Bid Relationship Target</span>
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                      <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1.5">Project / Bid Relationship Target</span>
                       {projects.find(pr => pr.id === viewingProposal.projectId) ? (
                         <div>
-                          <span className="text-xs font-bold text-white block mb-1">{projects.find(pr => pr.id === viewingProposal.projectId)?.title}</span>
-                          <span className="text-[11px] text-slate-400">Budget Range: <span className="text-emerald-400 font-semibold">${projects.find(pr => pr.id === viewingProposal.projectId)?.budgetMin} - ${projects.find(pr => pr.id === viewingProposal.projectId)?.budgetMax}</span></span>
+                          <span className="text-xs font-bold text-slate-900 block mb-1">{projects.find(pr => pr.id === viewingProposal.projectId)?.title}</span>
+                          <span className="text-[11px] text-slate-500">Budget Range: <span className="text-emerald-600 font-semibold">${projects.find(pr => pr.id === viewingProposal.projectId)?.budgetMin} - ${projects.find(pr => pr.id === viewingProposal.projectId)?.budgetMax}</span></span>
                         </div>
                       ) : (
-                        <span className="text-red-400 text-xs font-semibold">Referenced project has been deleted or suspended.</span>
+                        <span className="text-red-600 text-xs font-semibold">Referenced project has been deleted or suspended.</span>
                       )}
                     </div>
 
                     {/* Description/Cover Letter */}
-                    <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-2 text-xs">
-                      <h4 className="text-[11px] font-bold text-slate-400 uppercase">Cover Letter & Description / Milestones</h4>
-                      <p className="text-slate-200 leading-relaxed whitespace-pre-wrap">{viewingProposal.coverLetter}</p>
+                    <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-2 text-xs">
+                      <h4 className="text-[11px] font-bold text-slate-500 uppercase">Cover Letter & Description / Milestones</h4>
+                      <p className="text-slate-800 leading-relaxed whitespace-pre-wrap">{viewingProposal.coverLetter}</p>
                     </div>
                   </div>
                 </div>
@@ -3956,13 +4014,13 @@ export default function App() {
 
               {/* EDIT PROPOSAL MODAL */}
               {editingProposal && (
-                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-xl w-full space-y-5 text-slate-200">
-                    <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-                      <h3 className="text-lg font-bold text-white">Edit Bid Parameters — Proposal #{editingProposal.id}</h3>
+                <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-xl w-full space-y-5 text-slate-800 shadow-2xl">
+                    <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                      <h3 className="text-lg font-bold text-slate-900">Edit Bid Parameters — Proposal #{editingProposal.id}</h3>
                       <button 
                         onClick={() => setEditingProposal(null)}
-                        className="text-slate-400 hover:text-white text-xs font-bold"
+                        className="text-slate-400 hover:text-slate-700 text-xs font-bold"
                       >
                         Cancel
                       </button>
@@ -3971,33 +4029,33 @@ export default function App() {
                     <form onSubmit={handleSaveEditProposal} className="space-y-4 text-xs">
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">Bid Amount ($)</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">Bid Amount ($)</label>
                           <input 
                             type="number" 
                             value={editProposalForm.bidAmount}
                             onChange={(e) => setEditProposalForm(prev => ({ ...prev, bidAmount: Number(e.target.value) }))}
                             required
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                           />
                         </div>
                         <div>
-                          <label className="block text-slate-400 font-bold uppercase mb-1">Delivery Time (Days)</label>
+                          <label className="block text-slate-700 font-bold uppercase mb-1">Delivery Time (Days)</label>
                           <input 
                             type="number" 
                             value={editProposalForm.deliveryDays}
                             onChange={(e) => setEditProposalForm(prev => ({ ...prev, deliveryDays: Number(e.target.value) }))}
                             required
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                           />
                         </div>
                       </div>
 
                       <div>
-                        <label className="block text-slate-400 font-bold uppercase mb-1">Proposal Status</label>
+                        <label className="block text-slate-700 font-bold uppercase mb-1">Proposal Status</label>
                         <select 
                           value={editProposalForm.status}
                           onChange={(e) => setEditProposalForm(prev => ({ ...prev, status: e.target.value as any }))}
-                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                         >
                           <option value="pending">Pending</option>
                           <option value="accepted">Accepted</option>
@@ -4006,12 +4064,12 @@ export default function App() {
                       </div>
 
                       <div>
-                        <label className="block text-slate-400 font-bold uppercase mb-1">Cover Letter & Milestones / Deliverables</label>
+                        <label className="block text-slate-700 font-bold uppercase mb-1">Cover Letter & Milestones / Deliverables</label>
                         <textarea 
                           rows={6}
                           value={editProposalForm.coverLetter}
                           onChange={(e) => setEditProposalForm(prev => ({ ...prev, coverLetter: e.target.value }))}
-                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                         />
                       </div>
 
@@ -4019,13 +4077,13 @@ export default function App() {
                         <button 
                           type="button"
                           onClick={() => setEditingProposal(null)}
-                          className="px-4 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl hover:bg-slate-700"
+                          className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200"
                         >
                           Cancel
                         </button>
                         <button 
                           type="submit"
-                          className="px-5 py-2 bg-emerald-500 text-slate-950 font-bold rounded-xl hover:bg-emerald-400"
+                          className="px-5 py-2 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-500 shadow-xs"
                         >
                           Save Proposal
                         </button>
@@ -4042,21 +4100,26 @@ export default function App() {
             <UserWalletsLedgerModule currentUser={currentUser} />
           )}
 
+          {/* MODULE 12: PAYMENTS & EARNINGS */}
+          {(adminTab === 'payments' || path === '/payments') && (
+            <PaymentsModule />
+          )}
+
           {/* MODULE 11: ESCROW MANAGEMENT (MANDATORY 14-DAY PROTECTION) */}
           {adminTab === 'escrow' && (
-            <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-4">
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4 shadow-xs">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h3 className="text-base font-bold text-white">Escrow Protection Vault</h3>
-                  <p className="text-xs text-slate-400">Enforcing mandatory 14-day protection window on all milestone funds.</p>
+                  <h3 className="text-base font-bold text-slate-900">Escrow Protection Vault</h3>
+                  <p className="text-xs text-slate-500">Enforcing mandatory 14-day protection window on all milestone funds.</p>
                 </div>
-                <span className="text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20">
+                <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200">
                   {escrowProtectionDays}-Day Lock Policy
                 </span>
               </div>
 
               {orders.map(ord => (
-                <div key={ord.id} className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
+                <div key={ord.id} className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
                       {(() => {
@@ -4067,35 +4130,35 @@ export default function App() {
                               href={targetUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-xs font-bold text-white hover:text-emerald-400 transition-colors inline-flex items-center gap-1 group"
+                              className="text-xs font-bold text-slate-900 hover:text-emerald-600 transition-colors inline-flex items-center gap-1 group"
                               title={`View "${ord.title}" in new tab`}
                             >
                               <span className="group-hover:underline">{ord.title}</span>
-                              <ExternalLink className="w-3 h-3 text-emerald-400 shrink-0" />
+                              <ExternalLink className="w-3 h-3 text-emerald-600 shrink-0" />
                             </a>
                           </div>
                         );
                       })()}
-                      <span className="text-[11px] text-slate-400">Buyer ID: {ord.buyerId} · Seller ID: {ord.sellerId}</span>
+                      <span className="text-[11px] text-slate-500">Buyer ID: {ord.buyerId} · Seller ID: {ord.sellerId}</span>
                     </div>
-                    <span className="text-base font-extrabold text-emerald-400">${ord.amount}</span>
+                    <span className="text-base font-extrabold text-emerald-600">${ord.amount}</span>
                   </div>
 
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex items-center justify-between text-xs text-slate-300">
+                  <div className="bg-white p-3 rounded-xl border border-slate-200 flex items-center justify-between text-xs text-slate-700">
                     <div>
-                      <span className="text-slate-500 block text-[10px]">Protection Start</span>
-                      <span className="font-mono">{ord.escrowProtectionStartDate || '2026-10-05'}</span>
+                      <span className="text-slate-400 block text-[10px]">Protection Start</span>
+                      <span className="font-mono font-medium">{ord.escrowProtectionStartDate || '2026-10-05'}</span>
                     </div>
                     <div>
-                      <span className="text-slate-500 block text-[10px]">Protection End (14 Days)</span>
-                      <span className="font-mono text-emerald-400">{ord.escrowProtectionEndDate || '2026-10-19'}</span>
+                      <span className="text-slate-400 block text-[10px]">Protection End (14 Days)</span>
+                      <span className="font-mono text-emerald-600 font-bold">{ord.escrowProtectionEndDate || '2026-10-19'}</span>
                     </div>
                     <button 
                       onClick={() => {
                         setOrders(prev => prev.map(o => o.id === ord.id ? { ...o, status: 'completed' } : o));
                         alert(`Escrow released for order #${ord.id}`);
                       }}
-                      className="px-3 py-1.5 bg-emerald-500 text-slate-950 font-bold rounded-lg hover:bg-emerald-400"
+                      className="px-3.5 py-1.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-500 shadow-xs"
                     >
                       Release Funds
                     </button>
@@ -4108,35 +4171,42 @@ export default function App() {
           {/* MODULE 7: PAYOUT MANAGEMENT */}
           {adminTab === 'payouts' && (
             <div className="space-y-6">
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6">
-                <h3 className="text-lg font-bold text-white mb-2">Payout Management</h3>
-                <p className="text-xs text-slate-400">Manage freelancer payouts, statuses, and prevent duplicates.</p>
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs">
+                <h3 className="text-lg font-bold text-slate-900 mb-2">Payout Management</h3>
+                <p className="text-xs text-slate-500">Manage freelancer payouts, statuses, and prevent duplicates.</p>
               </div>
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 overflow-x-auto">
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 overflow-x-auto shadow-xs">
                 <table className="w-full text-left">
                   <thead>
-                    <tr className="text-slate-400 text-xs uppercase font-bold">
+                    <tr className="text-slate-500 text-xs uppercase font-bold border-b border-slate-100">
                       <th className="p-3">Freelancer ID</th>
                       <th className="p-3">Amount</th>
                       <th className="p-3">Status</th>
                       <th className="p-3 text-right">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800 text-xs text-slate-300">
+                  <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
                     {payouts.map(p => (
                       <tr key={p.id}>
                         <td className="p-3">{p.freelancerId}</td>
-                        <td className="p-3">${p.amount}</td>
-                        <td className="p-3 capitalize">{p.status}</td>
+                        <td className="p-3 font-bold">${p.amount}</td>
+                        <td className="p-3 capitalize">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                            p.status === 'approved' ? 'bg-emerald-50 text-emerald-700' :
+                            p.status === 'pending' ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-700'
+                          }`}>
+                            {p.status}
+                          </span>
+                        </td>
                         <td className="p-3 text-right space-x-2">
                           {p.status === 'pending' && (
                             <>
-                              <button onClick={() => handleApprovePayout(p.id)} className="text-emerald-400 font-bold hover:text-emerald-300">Approve</button>
-                              <button onClick={() => handleFailPayout(p.id)} className="text-red-400 font-bold hover:text-red-300">Fail</button>
+                              <button onClick={() => handleApprovePayout(p.id)} className="text-emerald-600 font-bold hover:text-emerald-700">Approve</button>
+                              <button onClick={() => handleFailPayout(p.id)} className="text-red-600 font-bold hover:text-red-700">Fail</button>
                             </>
                           )}
                           {p.status === 'approved' && (
-                            <button onClick={() => handleProcessPayout(p.id)} className="text-blue-400 font-bold hover:text-blue-300">Process</button>
+                            <button onClick={() => handleProcessPayout(p.id)} className="text-blue-600 font-bold hover:text-blue-700">Process</button>
                           )}
                         </td>
                       </tr>
@@ -4149,31 +4219,31 @@ export default function App() {
 
           {/* MODULE 11: DISPUTE MANAGEMENT */}
           {adminTab === 'disputes' && (
-            <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-4">
-              <h3 className="text-base font-bold text-white mb-4">Escrow Dispute Investigation Desk</h3>
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4 shadow-xs">
+              <h3 className="text-base font-bold text-slate-900 mb-4">Escrow Dispute Investigation Desk</h3>
               {disputes.map(disp => (
-                <div key={disp.id} className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
+                <div key={disp.id} className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white">Dispute #{disp.id} on Order #{disp.orderId}: {orders.find(o => o.id === disp.orderId)?.title || 'Unknown Order'}</span>
-                    <span className="text-xs font-bold uppercase text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded">
+                    <span className="text-xs font-bold text-slate-900">Dispute #{disp.id} on Order #{disp.orderId}: {orders.find(o => o.id === disp.orderId)?.title || 'Unknown Order'}</span>
+                    <span className="text-xs font-bold uppercase text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded">
                       {disp.status.replace(/_/g, ' ')}
                     </span>
                   </div>
 
-                  <p className="text-xs text-slate-300 bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <strong>Reason:</strong> {disp.reason}
+                  <p className="text-xs text-slate-700 bg-white p-3 rounded-xl border border-slate-200">
+                    <strong className="text-slate-900">Reason:</strong> {disp.reason}
                   </p>
 
                   <div className="flex items-center gap-3">
                     <button 
                       onClick={() => handleResolveDispute(disp.id, 'resolved_refund')}
-                      className="px-3 py-1.5 bg-red-500/20 text-red-300 border border-red-500/30 font-bold text-xs rounded-lg hover:bg-red-500/30"
+                      className="px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 font-bold text-xs rounded-lg hover:bg-red-100"
                     >
                       Full Refund to Buyer
                     </button>
                     <button 
                       onClick={() => handleResolveDispute(disp.id, 'resolved_release')}
-                      className="px-3 py-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold text-xs rounded-lg hover:bg-emerald-500/30"
+                      className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-xs rounded-lg hover:bg-emerald-100"
                     >
                       Release Escrow to Seller
                     </button>
@@ -4185,24 +4255,24 @@ export default function App() {
 
           {/* MODULE 17: SUPPORT TICKETS */}
           {adminTab === 'support' && (
-            <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-4">
-              <h3 className="text-base font-bold text-white mb-4">Support Ticket Help Desk</h3>
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4 shadow-xs">
+              <h3 className="text-base font-bold text-slate-900 mb-4">Support Ticket Help Desk</h3>
               {supportTickets.map(ticket => (
-                <div key={ticket.id} className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
+                <div key={ticket.id} className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
-                      <span className="text-xs font-bold text-white block">{ticket.subject}</span>
-                      <span className="text-xs text-slate-400">User: {ticket.userName} · Priority: {ticket.priority}</span>
+                      <span className="text-xs font-bold text-slate-900 block">{ticket.subject}</span>
+                      <span className="text-xs text-slate-500">User: {ticket.userName} · Priority: {ticket.priority}</span>
                     </div>
-                    <span className="text-xs font-bold text-emerald-400 uppercase bg-emerald-500/10 px-2.5 py-1 rounded">
+                    <span className="text-xs font-bold text-emerald-700 uppercase bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded">
                       {ticket.status}
                     </span>
                   </div>
 
-                  <div className="space-y-2 max-h-40 overflow-y-auto bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs">
+                  <div className="space-y-2 max-h-40 overflow-y-auto bg-white p-3 rounded-xl border border-slate-200 text-xs">
                     {ticket.messages.map((m, idx) => (
-                      <div key={idx} className="text-slate-300">
-                        <strong className="text-white">{m.sender}:</strong> {m.text}
+                      <div key={idx} className="text-slate-700">
+                        <strong className="text-slate-900">{m.sender}:</strong> {m.text}
                       </div>
                     ))}
                   </div>
@@ -4213,11 +4283,11 @@ export default function App() {
                       placeholder="Type staff reply..." 
                       value={ticketReplyText}
                       onChange={(e) => setTicketReplyText(e.target.value)}
-                      className="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none"
+                      className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
                     />
                     <button 
                       onClick={() => handleSupportReply(ticket.id)}
-                      className="px-4 py-2 bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs hover:bg-emerald-400"
+                      className="px-4 py-2 bg-emerald-600 text-white font-bold rounded-xl text-xs hover:bg-emerald-500 shadow-xs"
                     >
                       Reply Ticket
                     </button>
@@ -4227,48 +4297,60 @@ export default function App() {
             </div>
           )}
 
-          {/* MODULE 20: ACTIVITY & AUDIT TRAIL */}
+          {/* MODULE 20: SITE & FEE SETTINGS */}
+          {adminTab === 'settings' && (
+            <SiteFeeSettingsModule
+              currentUser={currentUser}
+              onSettingsSaved={(newSettings) => {
+                setPlatformFee(newSettings.freelancerCommissionRate);
+                setEscrowProtectionDays(newSettings.escrowHoldDays);
+                fetchAllAdminData();
+              }}
+            />
+          )}
+
+          {/* MODULE 21: ACTIVITY & AUDIT TRAIL */}
           {(adminTab === 'security' || adminTab === 'activity') && (
             <div className="space-y-6">
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-6">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-6 shadow-xs">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
                   <div>
-                    <h3 className="text-base font-bold text-white flex items-center gap-2">
-                      <Activity className="w-5 h-5 text-emerald-400" />
+                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <Activity className="w-5 h-5 text-emerald-600" />
                       <span>Admin Activity Logs & Audit Trail</span>
                     </h3>
-                    <p className="text-xs text-slate-400 mt-0.5">Real-time audit log of all administrative actions, user status changes, impersonation sessions, and category modifications.</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Real-time audit log of all administrative actions, user status changes, impersonation sessions, and category modifications.</p>
                   </div>
                   <button 
                     onClick={fetchAllAdminData}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-semibold rounded-xl border border-slate-800 transition-colors"
+                    className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-xl border border-slate-200 transition-colors"
                   >
-                    <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
+                    <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
                     <span>Refresh Activity Stream</span>
                   </button>
                 </div>
 
                 {/* Activity Stats Cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl">
-                    <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Total Actions Logged</span>
-                    <div className="text-xl font-extrabold text-white mt-1">{auditLogs.length}</div>
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl">
+                    <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Total Actions Logged</span>
+                    <div className="text-xl font-extrabold text-slate-900 mt-1">{auditLogs.length}</div>
                   </div>
-                  <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl">
-                    <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">User Governance</span>
-                    <div className="text-xl font-extrabold text-amber-400 mt-1">
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+                    <span className="text-[10px] uppercase font-bold text-amber-700 tracking-wider">User Governance</span>
+                    <div className="text-xl font-extrabold text-amber-800 mt-1">
                       {auditLogs.filter(l => l.action.includes('USER')).length}
                     </div>
                   </div>
-                  <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl">
-                    <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Impersonation Audits</span>
-                    <div className="text-xl font-extrabold text-indigo-400 mt-1">
+                  <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-2xl">
+                    <span className="text-[10px] uppercase font-bold text-indigo-700 tracking-wider">Impersonation Audits</span>
+                    <div className="text-xl font-extrabold text-indigo-800 mt-1">
                       {auditLogs.filter(l => l.action.includes('IMPERSONAT')).length}
                     </div>
                   </div>
-                  <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl">
-                    <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Category Operations</span>
-                    <div className="text-xl font-extrabold text-emerald-400 mt-1">
+                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl">
+                    <span className="text-[10px] uppercase font-bold text-emerald-700 tracking-wider">Category Operations</span>
+                    <div className="text-xl font-extrabold text-emerald-800 mt-1">
                       {auditLogs.filter(l => l.action.includes('CATEGORY')).length}
                     </div>
                   </div>
@@ -4277,13 +4359,13 @@ export default function App() {
                 {/* Search & Filter Bar */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="relative">
-                    <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                     <input 
                       type="text" 
                       placeholder="Search activity action, actor, target, or details..." 
                       value={activitySearchQuery}
                       onChange={(e) => setActivitySearchQuery(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                      className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:bg-white"
                     />
                   </div>
 
@@ -4291,7 +4373,7 @@ export default function App() {
                     <select 
                       value={activityActionFilter}
                       onChange={(e) => setActivityActionFilter(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-emerald-500 focus:bg-white"
                     >
                       <option value="all">All Administrative Actions</option>
                       <option value="user_status">User Status (Suspend / Restrict)</option>
@@ -4307,7 +4389,7 @@ export default function App() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
-                      <tr className="border-b border-slate-800 text-slate-400 uppercase text-[10px] tracking-wider font-bold bg-slate-900/60">
+                      <tr className="border-b border-slate-200 text-slate-500 uppercase text-[10px] tracking-wider font-bold bg-slate-50">
                         <th className="py-3 px-4">Timestamp</th>
                         <th className="py-3 px-4">Admin Actor</th>
                         <th className="py-3 px-4">Action Type</th>
@@ -4315,7 +4397,7 @@ export default function App() {
                         <th className="py-3 px-4">Activity Details</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800/60">
+                    <tbody className="divide-y divide-slate-100">
                       {auditLogs
                         .filter(log => {
                           const query = activitySearchQuery.toLowerCase().trim();
@@ -4335,34 +4417,35 @@ export default function App() {
                           return matchesQuery && matchesFilter;
                         })
                         .map(log => {
-                          let badgeBg = 'bg-slate-800 text-slate-300 border-slate-700';
-                          if (log.action.includes('SUSPEND') || log.action.includes('DELETED')) badgeBg = 'bg-red-500/20 text-red-300 border-red-500/30';
-                          else if (log.action.includes('RESTRICT')) badgeBg = 'bg-amber-500/20 text-amber-300 border-amber-500/30';
-                          else if (log.action.includes('IMPERSONAT')) badgeBg = 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30';
-                          else if (log.action.includes('CREATED') || log.action.includes('VERIFIED')) badgeBg = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
-                          else if (log.action.includes('RESOLVED') || log.action.includes('UPDATED')) badgeBg = 'bg-blue-500/20 text-blue-300 border-blue-500/30';
+                          let badgeBg = 'bg-slate-100 text-slate-700 border-slate-200';
+                          if (log.action.includes('SUSPEND') || log.action.includes('DELETED')) badgeBg = 'bg-red-50 text-red-700 border-red-200';
+                          else if (log.action.includes('RESTRICT')) badgeBg = 'bg-amber-50 text-amber-700 border-amber-200';
+                          else if (log.action.includes('IMPERSONAT')) badgeBg = 'bg-indigo-50 text-indigo-700 border-indigo-200';
+                          else if (log.action.includes('CREATED') || log.action.includes('VERIFIED')) badgeBg = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                          else if (log.action.includes('RESOLVED') || log.action.includes('UPDATED')) badgeBg = 'bg-blue-50 text-blue-700 border-blue-200';
 
                           return (
-                            <tr key={log.id} className="hover:bg-slate-900/40 transition-colors">
-                              <td className="py-3 px-4 text-slate-400 font-mono text-[11px] whitespace-nowrap">{log.timestamp}</td>
-                              <td className="py-3 px-4 font-bold text-white">
+                            <tr key={log.id} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="py-3 px-4 text-slate-500 font-mono text-[11px] whitespace-nowrap">{log.timestamp}</td>
+                              <td className="py-3 px-4 font-bold text-slate-900">
                                 <div>{log.actor}</div>
-                                <span className="text-[10px] text-slate-500 uppercase">{log.role}</span>
+                                <span className="text-[10px] text-slate-400 uppercase">{log.role}</span>
                               </td>
                               <td className="py-3 px-4 whitespace-nowrap">
                                 <span className={`inline-block px-2.5 py-1 rounded-md text-[10px] font-bold uppercase border ${badgeBg}`}>
                                   {log.action}
                                 </span>
                               </td>
-                              <td className="py-3 px-4 font-semibold text-slate-200 whitespace-nowrap">{log.target}</td>
-                              <td className="py-3 px-4 text-slate-300">{log.details}</td>
+                              <td className="py-3 px-4 font-semibold text-slate-800 whitespace-nowrap">{log.target}</td>
+                              <td className="py-3 px-4 text-slate-600">{log.details}</td>
                             </tr>
                           );
-                        })}
+                        })
+                      }
                     </tbody>
                   </table>
                   {auditLogs.length === 0 && (
-                    <div className="p-8 text-center text-slate-500 text-xs">No admin activity records logged yet.</div>
+                    <div className="p-8 text-center text-slate-400 text-xs">No admin activity records logged yet.</div>
                   )}
                 </div>
               </div>
@@ -4370,11 +4453,11 @@ export default function App() {
           )}
 
           {/* FALLBACK FOR OTHER MODULES */}
-          {!['overview', 'users', 'projects', 'gigs', 'categories', 'escrow', 'disputes', 'support', 'security', 'activity'].includes(adminTab) && (
-            <div className="bg-slate-950 border border-slate-800 rounded-3xl p-8 text-center space-y-3">
-              <ShieldCheck className="w-8 h-8 text-emerald-400 mx-auto" />
-              <h3 className="text-base font-bold text-white uppercase">{adminTab} Module Active</h3>
-              <p className="text-xs text-slate-400">All data records and audit logs for this module are synchronized with PostgreSQL storage.</p>
+          {!['overview', 'users', 'projects', 'gigs', 'categories', 'orders', 'proposals', 'wallet', 'escrow', 'payouts', 'disputes', 'support', 'settings', 'security', 'activity'].includes(adminTab) && (
+            <div className="bg-white border border-slate-200 rounded-3xl p-8 text-center space-y-3 shadow-xs">
+              <ShieldCheck className="w-8 h-8 text-emerald-600 mx-auto" />
+              <h3 className="text-base font-bold text-slate-900 uppercase">{adminTab} Module Active</h3>
+              <p className="text-xs text-slate-500">All data records and audit logs for this module are synchronized with PostgreSQL storage.</p>
             </div>
           )}
         </main>
@@ -4490,16 +4573,141 @@ export default function App() {
             <span>Create Gig</span>
           </a>
 
-          <div className="flex items-center gap-2.5 pl-2 border-l border-slate-200">
-            <img src={impersonatedUser ? impersonatedUser.avatar : currentUser.avatar} className="w-9 h-9 rounded-full object-cover ring-2 ring-emerald-500/20" />
-            <div className="hidden xl:block text-left">
-              <span className="text-xs font-semibold text-slate-900 block">
-                {impersonatedUser ? impersonatedUser.name : currentUser.name}
-              </span>
-              <span className="text-[11px] text-slate-500 block truncate max-w-[120px]">
-                {impersonatedUser ? 'Impersonated User' : currentUser.title}
-              </span>
+          <div className="relative pl-2 border-l border-slate-200">
+            <div 
+              onClick={() => setIsUserDropdownOpen(!isUserDropdownOpen)}
+              className="flex items-center gap-2 cursor-pointer p-1 rounded-xl hover:bg-slate-100 transition-colors"
+            >
+              <img src={impersonatedUser ? impersonatedUser.avatar : currentUser.avatar} className="w-9 h-9 rounded-full object-cover ring-2 ring-emerald-500/20" />
+              <div className="hidden xl:block text-left">
+                <div className="flex items-center gap-1">
+                  <span className="text-xs font-semibold text-slate-900 block">
+                    {impersonatedUser ? impersonatedUser.name : currentUser.name}
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
+                </div>
+                <span className="text-[11px] text-slate-500 block truncate max-w-[120px]">
+                  {impersonatedUser ? 'Impersonated User' : currentUser.title}
+                </span>
+              </div>
             </div>
+
+            {/* Tiny Dropdown Menu */}
+            {isUserDropdownOpen && (
+              <div className="absolute right-0 mt-2 w-64 bg-white border border-slate-200 rounded-2xl shadow-2xl py-3 z-50 text-xs">
+                <div className="px-4 py-2.5 border-b border-slate-100 flex items-center justify-between mb-1">
+                  <div>
+                    <span className="font-bold text-slate-900 text-sm block">{impersonatedUser ? impersonatedUser.name : currentUser.name}</span>
+                    <span className="text-[11px] text-slate-400 font-mono">ID: {impersonatedUser ? impersonatedUser.id : currentUser.id}</span>
+                  </div>
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    Available
+                  </span>
+                </div>
+
+                {/* Wallet & Available Funds (Excluding Escrow Funds) */}
+                <div className="mx-3 my-2 px-3 py-2.5 bg-emerald-50/80 rounded-xl border border-emerald-100 flex items-center justify-between text-slate-800">
+                  <div className="flex items-center gap-2">
+                    <Wallet className="w-4 h-4 text-emerald-600" />
+                    <div>
+                      <span className="font-bold text-[11px] block text-emerald-900">Wallet Balance</span>
+                      <span className="text-[9px] text-emerald-600">Spendable Funds</span>
+                    </div>
+                  </div>
+                  <span className="font-black text-emerald-700 text-sm">
+                    ${(impersonatedUser ? impersonatedUser.walletBalance : currentUser.walletBalance).toLocaleString()}
+                  </span>
+                </div>
+
+                <div className="px-2 py-1 space-y-0.5">
+                  <button 
+                    onClick={(e) => { 
+                      const uname = slugify(impersonatedUser ? impersonatedUser.name : currentUser.name);
+                      navigate(`/${uname}`, e); 
+                      setIsUserDropdownOpen(false); 
+                    }}
+                    className="w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium transition"
+                  >
+                    <User className="w-4 h-4 text-emerald-600" />
+                    <span>View Profile</span>
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={(e) => { navigate('/messages', e); setIsUserDropdownOpen(false); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium transition"
+                  >
+                    <Briefcase className="w-4 h-4 text-emerald-600" />
+                    <span>My Workstreams & Messages</span>
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={(e) => { navigate('/create-gig', e); setIsUserDropdownOpen(false); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium transition"
+                  >
+                    <Layers className="w-4 h-4 text-indigo-600" />
+                    <span>My Gigs / Services</span>
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={(e) => { navigate('/buyer-activity', e); setIsUserDropdownOpen(false); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium transition"
+                  >
+                    <ShoppingBag className="w-4 h-4 text-emerald-600" />
+                    <span>Buyer Activity</span>
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={(e) => { navigate('/freelancer-activity', e); setIsUserDropdownOpen(false); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium transition"
+                  >
+                    <Briefcase className="w-4 h-4 text-emerald-600" />
+                    <span>Freelancer Activity</span>
+                  </button>
+                  <button 
+                    onClick={(e) => { navigate('/payments', e); setIsUserDropdownOpen(false); }}
+                    className="w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium transition"
+                  >
+                    <CreditCard className="w-4 h-4 text-emerald-600" />
+                    <span>Payments</span>
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={(e) => { navigate('/admin', e); setIsUserDropdownOpen(false); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium transition"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-purple-600" />
+                    <span>Admin Panel</span>
+                  </button>
+                </div>
+
+                <div className="border-t border-slate-100 my-2"></div>
+
+                <div className="px-2 space-y-0.5">
+                  <button 
+                    onClick={() => { setIsUserDropdownOpen(false); alert('Switched to Buyer Mode'); }}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium flex items-center gap-2.5 transition"
+                  >
+                    <Users className="w-4 h-4 text-slate-500" />
+                    <span>Switch to Buyer Mode</span>
+                  </button>
+                  <button 
+                    onClick={() => { setIsUserDropdownOpen(false); alert('Account settings & preferences'); }}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium flex items-center gap-2.5 transition"
+                  >
+                    <Settings className="w-4 h-4 text-slate-500" />
+                    <span>Account Settings</span>
+                  </button>
+                  <button 
+                    onClick={() => { setIsUserDropdownOpen(false); alert('Signed out successfully'); }}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-50 text-red-600 font-medium flex items-center gap-2.5 transition"
+                  >
+                    <LogOut className="w-4 h-4 text-red-500" />
+                    <span>Log Out</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -4734,15 +4942,22 @@ export default function App() {
                   <div className="p-4 flex-1 flex flex-col justify-between">
                     <div>
                       {/* Seller info row */}
-                      <div className="flex items-center gap-2.5 mb-2.5">
+                      <a 
+                        href={`/${slugify(gig.freelancerName)}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/${slugify(gig.freelancerName)}`, e);
+                        }}
+                        className="flex items-center gap-2.5 mb-2.5 group/seller"
+                      >
                         <img src={gig.freelancerAvatar} alt={gig.freelancerName} className="w-8 h-8 rounded-full object-cover" />
                         <div>
                           <div className="flex items-center gap-1.5">
-                            <span className="text-sm font-bold text-slate-900">{gig.freelancerName}</span>
+                            <span className="text-sm font-bold text-slate-900 group-hover/seller:underline">{gig.freelancerName}</span>
                           </div>
                           <span className="text-xs text-slate-500 font-medium">{gig.freelancerLevel || 'Top Rated'}</span>
                         </div>
-                      </div>
+                      </a>
 
                       <h3 className="text-sm font-normal text-slate-900 line-clamp-2 group-hover:text-emerald-600 transition-colors mb-3 leading-snug">
                         {gig.title}
@@ -5227,71 +5442,351 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 6: LIVE CHAT HUB (/messages) */}
+        {/* VIEW 6: PEOPLEPERHOUR STYLE "MY WORKSTREAMS" & SELLER PROFILES (/messages) */}
         {isMessages && (
-          <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-xs grid grid-cols-1 md:grid-cols-3 h-[650px]">
-            <div className="border-r border-slate-200 p-4 overflow-y-auto bg-slate-50">
-              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 px-2">Active Conversations</h3>
-              <div className="space-y-2">
-                {orders.map(ord => (
-                  <div 
-                    key={ord.id}
-                    onClick={() => { setSelectedOrder(ord); fetchMessages(ord.id); }}
-                    className={`p-3.5 rounded-2xl cursor-pointer transition-all ${selectedOrder?.id === ord.id ? 'bg-slate-900 text-white shadow-md' : 'bg-white hover:bg-slate-100 border border-slate-200/60'}`}
+          <div className="bg-slate-50 min-h-[750px] grid grid-cols-1 lg:grid-cols-4 gap-6 font-sans">
+            {/* LEFT SIDEBAR: WORKSTREAM FILTERS, PROJECTS & MY PEOPLE */}
+            <div className="space-y-6 lg:col-span-1">
+              {/* WORKSTREAM FILTERS */}
+              <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs space-y-2">
+                <h3 className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 px-2 mb-3">Workstream Filters</h3>
+                {[
+                  { id: 'all', label: 'All Workstreams', count: orders.length },
+                  { id: 'inbox', label: 'Inbox', count: 575 },
+                  { id: 'discussion', label: 'In Discussion', count: 249 },
+                  { id: 'in_progress', label: 'Work in Progress', count: orders.filter(o => o.status === 'in_progress').length },
+                  { id: 'completed', label: 'Completed', count: orders.filter(o => o.status === 'completed').length },
+                  { id: 'starred', label: 'Starred', count: starredWorkstreams.length },
+                  { id: 'escrow', label: 'With Escrow', count: orders.length },
+                  { id: 'archived', label: 'Archived', count: 2 },
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setWorkstreamTab(tab.id as any)}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                      workstreamTab === tab.id ? 'bg-slate-900 text-white font-bold' : 'text-slate-600 hover:bg-slate-100'
+                    }`}
                   >
-                    <span className="text-xs font-bold block mb-1">{ord.title}</span>
-                    <span className={`text-[11px] ${selectedOrder?.id === ord.id ? 'text-emerald-400' : 'text-slate-500'}`}>Order #{ord.id}</span>
-                  </div>
+                    <span>{tab.label}</span>
+                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${workstreamTab === tab.id ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
+                      {tab.count}
+                    </span>
+                  </button>
                 ))}
+              </div>
+
+              {/* PROJECTS SECTION */}
+              <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs space-y-3">
+                <h3 className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 px-2">Projects</h3>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto text-xs">
+                  {projects.slice(0, 5).map(p => (
+                    <div key={p.id} className="px-2 py-1.5 rounded-lg hover:bg-slate-50 text-slate-700 truncate cursor-pointer font-medium" title={p.title}>
+                      • {p.title}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* MY PEOPLE / SELLER PROFILES SECTION */}
+              <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs space-y-3">
+                <div className="flex items-center justify-between px-2">
+                  <h3 className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">My People</h3>
+                  <span className="text-[10px] font-bold text-emerald-600 font-mono">8 Active</span>
+                </div>
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                  <input 
+                    type="text"
+                    placeholder="Search People..."
+                    value={peopleSearch}
+                    onChange={(e) => setPeopleSearch(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="space-y-2 max-h-64 overflow-y-auto pt-1">
+                  {[
+                    { name: 'Julio M.', flag: '🇺🇸', role: 'Buyer', count: 1, avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop' },
+                    { name: 'TIM Company GmbH', flag: '🇩🇪', role: 'Agency', count: 2, avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop' },
+                    { name: 'Ali Y.', flag: '🇹🇷', role: 'Freelancer', count: 1, avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&h=100&fit=crop' },
+                    { name: 'Daniel H.', flag: '🇬🇧', role: 'Buyer', count: 1, avatar: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=100&h=100&fit=crop' },
+                    { name: 'Shay W.', flag: '🇺🇸', role: 'Freelancer', count: 1, avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100&h=100&fit=crop' },
+                    { name: 'Stephen R.', flag: '🇬🇧', role: 'Seller', count: 3, avatar: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=100&h=100&fit=crop' },
+                    { name: 'Rahul S.', flag: '🇮🇳', role: 'Seller', count: 2, avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=100&h=100&fit=crop' },
+                  ]
+                  .filter(p => !peopleSearch || p.name.toLowerCase().includes(peopleSearch.toLowerCase()))
+                  .map((person, idx) => (
+                    <div 
+                      key={idx}
+                      onClick={() => setSelectedPersonFilter(person.name)}
+                      className={`flex items-center justify-between p-2 rounded-xl cursor-pointer transition-colors ${selectedPersonFilter === person.name ? 'bg-emerald-50 border border-emerald-200' : 'hover:bg-slate-50'}`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <img src={person.avatar} className="w-7 h-7 rounded-full object-cover ring-1 ring-slate-200" />
+                        <div>
+                          <div className="flex items-center gap-1 text-xs font-bold text-slate-900">
+                            <span>{person.name}</span>
+                            <span>{person.flag}</span>
+                          </div>
+                          <span className="text-[10px] text-slate-400">{person.role}</span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full">
+                        {person.count}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 
-            <div className="md:col-span-2 flex flex-col justify-between h-full bg-white">
-              {selectedOrder ? (
-                <>
-                  <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
+            {/* MAIN CONTENT AREA: MY WORKSTREAMS TABLE & CHAT WORKSPACE */}
+            <div className="lg:col-span-3 space-y-6">
+              {/* HEADER & CONTROLS */}
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-xl font-black text-slate-900 tracking-tight">My Workstreams</h1>
+                  <p className="text-xs text-slate-500 mt-0.5">Manage active collaborations, deliverables, client chats, and secure escrow accounts.</p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={() => { setSelectedPersonFilter(null); setWorkstreamSearch(''); }}
+                    className="p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl border border-slate-200 transition-colors"
+                    title="Reset Filters"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+
+                  <button 
+                    onClick={() => setIsStartWorkstreamModalOpen(true)}
+                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-colors whitespace-nowrap"
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                    <span>START NEW WORKSTREAM</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* SEARCH BAR */}
+              <div className="bg-white border border-slate-200 rounded-3xl p-4 shadow-xs flex items-center gap-3">
+                <Search className="w-4 h-4 text-slate-400 ml-2" />
+                <input 
+                  type="text"
+                  placeholder="Type and hit enter to search workstreams..."
+                  value={workstreamSearch}
+                  onChange={(e) => setWorkstreamSearch(e.target.value)}
+                  className="w-full bg-transparent text-xs text-slate-900 placeholder-slate-400 focus:outline-none"
+                />
+              </div>
+
+              {/* WORKSTREAMS LIST TABLE */}
+              <div className="bg-white border border-slate-200 rounded-3xl shadow-xs overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                        <th className="py-3 px-4 w-10">
+                          <input type="checkbox" className="rounded border-slate-300 text-emerald-600" />
+                        </th>
+                        <th className="py-3 px-2 w-10">★</th>
+                        <th className="py-3 px-4">Contact / Partner</th>
+                        <th className="py-3 px-4">Workstream Title & Preview</th>
+                        <th className="py-3 px-4">Status & Escrow</th>
+                        <th className="py-3 px-4 text-right">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
+                      {orders
+                        .filter(ord => {
+                          const matchesTab = 
+                            workstreamTab === 'all' || 
+                            (workstreamTab === 'inbox' && true) ||
+                            (workstreamTab === 'discussion' && ord.status === 'in_progress') ||
+                            (workstreamTab === 'in_progress' && ord.status === 'in_progress') ||
+                            (workstreamTab === 'completed' && ord.status === 'completed') ||
+                            (workstreamTab === 'starred' && starredWorkstreams.includes(ord.id)) ||
+                            (workstreamTab === 'escrow' && true) ||
+                            (workstreamTab === 'archived' && false);
+                          
+                          const matchesSearch = !workstreamSearch || ord.title.toLowerCase().includes(workstreamSearch.toLowerCase()) || ord.id.toLowerCase().includes(workstreamSearch.toLowerCase());
+                          const matchesPerson = !selectedPersonFilter || ord.sellerId.includes(selectedPersonFilter);
+
+                          return matchesTab && matchesSearch && matchesPerson;
+                        })
+                        .map(ord => {
+                          const isStarred = starredWorkstreams.includes(ord.id);
+                          const isSelected = selectedOrder?.id === ord.id;
+                          return (
+                            <tr 
+                              key={ord.id}
+                              onClick={() => { setSelectedOrder(ord); fetchMessages(ord.id); }}
+                              className={`hover:bg-slate-50 cursor-pointer transition-colors ${isSelected ? 'bg-emerald-50/50' : ''}`}
+                            >
+                              <td className="py-4 px-4" onClick={(e) => e.stopPropagation()}>
+                                <input type="checkbox" className="rounded border-slate-300 text-emerald-600" />
+                              </td>
+                              <td className="py-4 px-2" onClick={(e) => {
+                                e.stopPropagation();
+                                setStarredWorkstreams(prev => isStarred ? prev.filter(id => id !== ord.id) : [...prev, ord.id]);
+                              }}>
+                                <span className={`cursor-pointer text-sm ${isStarred ? 'text-amber-500 font-bold' : 'text-slate-300 hover:text-amber-400'}`}>
+                                  ★
+                                </span>
+                              </td>
+                              <td className="py-4 px-4">
+                                <div className="flex items-center gap-2.5">
+                                  <img 
+                                    src={'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=100&h=100&fit=crop'} 
+                                    className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 shrink-0" 
+                                  />
+                                  <div>
+                                    <div className="flex items-center gap-1 font-bold text-slate-900">
+                                      <span>Stephen R.</span>
+                                      <span>🇬🇧</span>
+                                    </div>
+                                    <span className="text-[10px] text-slate-400">Order #{ord.id}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="py-4 px-4">
+                                <span className="font-bold text-slate-900 block">{ord.title}</span>
+                                <span className="text-[11px] text-slate-500 truncate max-w-xs block mt-0.5">
+                                  {ord.requirements || 'Hi Nikhil, Hope you are doing well. Please check the deliverables.'}
+                                </span>
+                              </td>
+                              <td className="py-4 px-4">
+                                <div className="space-y-1">
+                                  <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                    ord.status === 'completed' ? 'bg-emerald-50 text-emerald-700' :
+                                    ord.status === 'in_progress' ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-700'
+                                  }`}>
+                                    {ord.status.replace(/_/g, ' ')}
+                                  </span>
+                                  <span className="font-mono font-extrabold text-emerald-600 block text-xs">
+                                    ${ord.amount}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="py-4 px-4 text-right font-mono text-[11px] text-slate-400 whitespace-nowrap">
+                                {ord.createdAt || '31 Jul 2026'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* SPLIT / ACTIVE CHAT DRAWER IF ORDER SELECTED */}
+              {selectedOrder && (
+                <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-4">
+                  <div className="flex items-center justify-between pb-4 border-b border-slate-100">
                     <div>
-                      <h3 className="text-sm font-bold text-slate-900">{selectedOrder.title}</h3>
-                      <span className="text-[11px] text-emerald-600 font-medium">Live WebSocket Connected</span>
+                      <h3 className="text-base font-bold text-slate-900">Workstream Chat & Collaboration — {selectedOrder.title}</h3>
+                      <span className="text-xs text-emerald-600 font-medium">Order #{selectedOrder.id} · ${selectedOrder.amount} in Escrow</span>
                     </div>
-                    <span className="text-xs font-semibold bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-lg">${selectedOrder.amount} Escrow</span>
+                    <button 
+                      onClick={() => setSelectedOrder(null)}
+                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl"
+                    >
+                      Close Chat
+                    </button>
                   </div>
 
-                  <div className="p-6 flex-1 overflow-y-auto space-y-4 bg-slate-50/30">
+                  <div className="h-64 overflow-y-auto space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
                     {messages.map(msg => {
                       const isMe = msg.senderId === currentUser.id;
                       return (
                         <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-[11px] font-semibold text-slate-600">{msg.senderName}</span>
-                            <span className="text-[10px] text-slate-400">{msg.timestamp}</span>
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <span className="text-[10px] font-bold text-slate-600">{msg.senderName}</span>
+                            <span className="text-[9px] text-slate-400">{msg.timestamp}</span>
                           </div>
-                          <div className={`p-3.5 rounded-2xl text-sm max-w-md ${isMe ? 'bg-slate-900 text-white rounded-br-xs' : 'bg-white text-slate-900 border border-slate-200 rounded-bl-xs shadow-xs'}`}>
+                          <div className={`p-3 rounded-2xl text-xs max-w-md ${isMe ? 'bg-slate-900 text-white rounded-br-xs' : 'bg-white text-slate-900 border border-slate-200 rounded-bl-xs shadow-xs'}`}>
                             {msg.text}
                           </div>
                         </div>
                       );
                     })}
+                    {messages.length === 0 && (
+                      <div className="text-center py-12 text-slate-400 text-xs">No messages yet. Send a message to start collaboration.</div>
+                    )}
                   </div>
 
-                  <form onSubmit={handleSendMessage} className="p-4 border-t border-slate-200 bg-white flex items-center gap-3">
+                  <form onSubmit={handleSendMessage} className="flex items-center gap-3">
                     <input 
-                      type="text" 
-                      placeholder="Type a message to buyer/seller..." 
+                      type="text"
+                      placeholder="Type a message to partner..."
                       value={newMessageText}
                       onChange={(e) => setNewMessageText(e.target.value)}
-                      className="flex-1 px-4 py-3 bg-slate-100 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+                      className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
                     />
-                    <button type="submit" className="px-5 py-3 bg-slate-900 text-white font-semibold rounded-xl hover:bg-slate-800 transition-colors flex items-center gap-1.5 text-xs">
-                      <Send className="w-4 h-4 text-emerald-400" />
+                    <button type="submit" className="px-5 py-2.5 bg-slate-900 text-white font-bold rounded-xl text-xs hover:bg-slate-800 flex items-center gap-1.5 shadow-xs">
+                      <Send className="w-3.5 h-3.5 text-emerald-400" />
                       <span>Send</span>
                     </button>
                   </form>
-                </>
-              ) : (
-                <div className="flex items-center justify-center h-full text-slate-400 text-sm">Select an order to start messaging.</div>
+                </div>
               )}
             </div>
+
+            {/* START NEW WORKSTREAM MODAL */}
+            {isStartWorkstreamModalOpen && (
+              <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+                <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-md w-full space-y-5 shadow-2xl text-slate-800">
+                  <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                    <h3 className="text-lg font-bold text-slate-900">Start New Workstream</h3>
+                    <button onClick={() => setIsStartWorkstreamModalOpen(false)} className="text-slate-400 hover:text-slate-700 text-xs font-bold">Cancel</button>
+                  </div>
+
+                  <form onSubmit={handleCreateNewWorkstream} className="space-y-4 text-xs">
+                    <div>
+                      <label className="block text-slate-700 font-bold uppercase mb-1">Workstream / Service Title</label>
+                      <input 
+                        type="text" 
+                        placeholder="e.g. Custom React Full Stack Development..." 
+                        value={newWsTitle}
+                        onChange={(e) => setNewWsTitle(e.target.value)}
+                        required
+                        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-700 font-bold uppercase mb-1">Select Partner / Freelancer</label>
+                      <select 
+                        value={newWsRecipient}
+                        onChange={(e) => setNewWsRecipient(e.target.value)}
+                        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500"
+                      >
+                        <option value="Stephen R. (UK)">Stephen R. (UK) 🇬🇧</option>
+                        <option value="Julio M. (USA)">Julio M. (USA) 🇺🇸</option>
+                        <option value="TIM Company GmbH (GER)">TIM Company GmbH (GER) 🇩🇪</option>
+                        <option value="Rahul S. (IND)">Rahul S. (IND) 🇮🇳</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-700 font-bold uppercase mb-1">Escrow Amount ($)</label>
+                      <input 
+                        type="number" 
+                        value={newWsAmount}
+                        onChange={(e) => setNewWsAmount(Number(e.target.value))}
+                        required
+                        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div className="pt-3 flex items-center justify-end gap-2 border-t border-slate-100">
+                      <button type="button" onClick={() => setIsStartWorkstreamModalOpen(false)} className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl">Cancel</button>
+                      <button type="submit" className="px-5 py-2 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-500 shadow-xs">Start Workstream</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -5660,6 +6155,431 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* PROFILE PAGE VIEW (Complete webpage with search engine friendly URL /:username & Left Sidebar) */}
+      {isProfilePage && profileUser && (
+        <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
+          {/* Breadcrumbs */}
+          <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
+            <div className="flex items-center gap-2">
+              <a href="/gigs" onClick={(e) => navigate('/gigs', e)} className="hover:text-slate-900">Home</a>
+              <span>/</span>
+              <span className="text-slate-900 font-semibold">Freelancer Profile</span>
+              <span>/</span>
+              <span className="text-slate-500">@{profileUserUsername || slugify(profileUser.name)}</span>
+            </div>
+            {currentUser.id === profileUser.id && (
+              <button 
+                onClick={() => alert('Profile Edit Mode Activated. You can update your bio, hourly rate, and portfolio.')}
+                className="px-3 py-1.5 bg-slate-900 text-white rounded-xl font-bold flex items-center gap-1.5 hover:bg-slate-800 shadow-sm"
+              >
+                <Settings className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Edit Profile</span>
+              </button>
+            )}
+          </div>
+
+          {/* Cover Photo Banner */}
+          <div className="relative w-full h-48 sm:h-64 rounded-3xl overflow-hidden shadow-md bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900">
+            <img 
+              src="https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=1600&h=400&fit=crop" 
+              className="w-full h-full object-cover opacity-40 mix-blend-overlay"
+              alt="Cover Banner"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent flex items-end p-6">
+              <div className="flex items-center gap-4 text-white">
+                <span className="px-3 py-1 bg-emerald-500/90 backdrop-blur-md rounded-full font-bold text-xs flex items-center gap-1.5 text-slate-950 shadow">
+                  <ShieldCheck className="w-4 h-4" /> Top Rated Expert on WorkPerHour
+                </span>
+                <span className="hidden sm:inline text-xs text-slate-200">Member since Jan 2023 · Verified Escrow Provider</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 -mt-12 relative z-10">
+            {/* LEFT SIDEBAR */}
+            <div className="lg:col-span-4 space-y-6">
+              <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-xl space-y-6 text-xs">
+                <div className="text-center relative pt-2">
+                  <div className="absolute top-2 right-0">
+                    <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full font-bold text-[10px] flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                      Verified
+                    </span>
+                  </div>
+                  <div className="relative inline-block mb-4">
+                    <img 
+                      src={profileUser.avatar} 
+                      className="w-32 h-32 rounded-3xl object-cover ring-4 ring-emerald-500/20 mx-auto shadow-md" 
+                    />
+                    <span className="absolute bottom-1 right-1 w-5 h-5 bg-emerald-500 border-2 border-white rounded-full" title="Online Now"></span>
+                  </div>
+                  <h2 className="text-lg font-black text-slate-900">{profileUser.name}</h2>
+                  <p className="text-slate-600 font-medium mt-1">{profileUser.title || 'Senior Full-Stack & AI Systems Architect'}</p>
+                  <p className="text-[11px] text-slate-400 mt-1 flex items-center justify-center gap-1">
+                    <span>🇬🇧 London, United Kingdom</span>
+                    <span>·</span>
+                    <span className="text-emerald-600 font-semibold">Local time: 10:45 AM</span>
+                  </p>
+                </div>
+
+                <div className="pt-4 border-t border-slate-100 space-y-3">
+                  <div className="flex items-center justify-between bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                    <span className="text-slate-500 font-medium">Hourly Rate</span>
+                    <span className="text-base font-extrabold text-slate-900">${profileUser.hourlyRate || 85}.00 / hr</span>
+                  </div>
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-slate-500 font-medium">Job Success</span>
+                    <span className="font-extrabold text-emerald-600">99%</span>
+                  </div>
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-slate-500 font-medium">Total Earned</span>
+                    <span className="font-extrabold text-slate-900">${profileUser.earned ? profileUser.earned.toLocaleString() : '48,500'}</span>
+                  </div>
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-slate-500 font-medium">Completed Jobs</span>
+                    <span className="font-extrabold text-slate-900">{profileUser.completedJobs || 165}+</span>
+                  </div>
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-slate-500 font-medium">Response Time</span>
+                    <span className="font-extrabold text-slate-900">&lt; 1 hour</span>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-slate-100 space-y-3">
+                  <button 
+                    onClick={(e) => navigate('/messages', e)}
+                    className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-2xl shadow-md transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Briefcase className="w-4 h-4 text-emerald-400" />
+                    <span>Start Workstream</span>
+                  </button>
+                  <button 
+                    onClick={(e) => navigate('/messages', e)}
+                    className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl transition-colors flex items-center justify-center gap-2"
+                  >
+                    <MessageSquare className="w-4 h-4 text-slate-500" />
+                    <span>Send Message</span>
+                  </button>
+                </div>
+
+                <div className="pt-4 border-t border-slate-100 space-y-2">
+                  <h4 className="font-bold text-slate-900 uppercase tracking-wider text-[11px]">Verifications</h4>
+                  <div className="space-y-1.5 text-slate-600">
+                    <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-emerald-600" /><span>ID Verified</span></div>
+                    <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-emerald-600" /><span>Payment Verified (Escrow)</span></div>
+                    <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-emerald-600" /><span>Phone & Email Verified</span></div>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-slate-100 space-y-2">
+                  <h4 className="font-bold text-slate-900 uppercase tracking-wider text-[11px]">Languages</h4>
+                  <div className="space-y-1 text-slate-600">
+                    <div className="flex justify-between"><span>English</span><span className="text-slate-400">Native</span></div>
+                    <div className="flex justify-between"><span>Spanish</span><span className="text-slate-400">Fluent</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* RIGHT MAIN CONTENT AREA */}
+            <div className="lg:col-span-8 space-y-6">
+              <div className="bg-white border border-slate-200/80 rounded-3xl p-8 shadow-xl space-y-6 text-xs">
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                  <div>
+                    <h3 className="text-base font-extrabold text-slate-900">About Me</h3>
+                    <p className="text-slate-500 mt-0.5">Professional Freelancer & Certified Expert on WorkPerHour</p>
+                  </div>
+                  <span className="px-3 py-1 bg-amber-50 text-amber-800 rounded-full font-bold text-xs flex items-center gap-1 border border-amber-200">
+                    ★ 4.98 (312 Reviews)
+                  </span>
+                </div>
+
+                <p className="text-slate-600 leading-relaxed bg-slate-50 p-5 rounded-2xl border border-slate-100">
+                  {profileUser.bio || 'Product engineer building scalable SaaS apps and high-performance web applications with React, TypeScript, Node.js, and secure Escrow protection workflows.'}
+                </p>
+
+                {/* Profile Tabs Navigation */}
+                <div className="flex items-center gap-6 border-b border-slate-200 pb-3 text-sm font-bold">
+                  <button 
+                    onClick={() => setProfileTab('gigs')} 
+                    className={`pb-2 transition-colors cursor-pointer ${profileTab === 'gigs' ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-500 hover:text-slate-900'}`}
+                  >
+                    Offers & Gigs (2)
+                  </button>
+                  <button 
+                    onClick={() => setProfileTab('portfolio')} 
+                    className={`pb-2 transition-colors cursor-pointer ${profileTab === 'portfolio' ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-500 hover:text-slate-900'}`}
+                  >
+                    Portfolio Showcase (4)
+                  </button>
+                  <button 
+                    onClick={() => setProfileTab('reviews')} 
+                    className={`pb-2 transition-colors cursor-pointer ${profileTab === 'reviews' ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-500 hover:text-slate-900'}`}
+                  >
+                    Reviews (312)
+                  </button>
+                  <button 
+                    onClick={() => setProfileTab('endorsements')} 
+                    className={`pb-2 transition-colors cursor-pointer ${profileTab === 'endorsements' ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-500 hover:text-slate-900'}`}
+                  >
+                    Endorsements
+                  </button>
+                </div>
+
+                {/* Skills & Expertise */}
+                <div className="space-y-3 pt-2">
+                  <h4 className="font-bold text-slate-900 uppercase tracking-wider">Skills & Expertise</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {(profileUser.skills && profileUser.skills.length > 0 ? profileUser.skills : ['React.js', 'TypeScript', 'Node.js', 'Next.js', 'Python', 'PostgreSQL', 'Tailwind CSS', 'Gemini AI API']).map((skill, idx) => (
+                      <span key={idx} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-medium transition-colors cursor-pointer">
+                        {skill}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Active Gigs Tab Content */}
+                {profileTab === 'gigs' && (
+                  <div className="space-y-4 pt-4 border-t border-slate-100">
+                    <h4 className="font-bold text-slate-900 uppercase tracking-wider">Gigs Offered by {profileUser.name}</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {(() => {
+                        const sellerGigs = gigs.filter(g => g.freelancerId === profileUser.id || g.freelancerName.toLowerCase() === profileUser.name.toLowerCase());
+                        const displayGigs = sellerGigs.length > 0 ? sellerGigs : [
+                          {
+                            id: 'gig_sample_1',
+                            freelancerId: profileUser.id,
+                            freelancerName: profileUser.name,
+                            freelancerUsername: profileUserUsername || slugify(profileUser.name),
+                            freelancerAvatar: profileUser.avatar,
+                            title: 'I will build full-stack React & TypeScript web apps with secure Escrow',
+                            slug: 'i-will-build-full-stack-react-typescript-web-apps',
+                            category: 'Development & IT',
+                            description: 'Full stack development with React, Node and Escrow.',
+                            price: 450,
+                            deliveryDays: 3,
+                            rating: 5.0,
+                            reviewsCount: 84,
+                            image: 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=500&h=300&fit=crop',
+                            status: 'published',
+                            featured: true
+                          },
+                          {
+                            id: 'gig_sample_2',
+                            freelancerId: profileUser.id,
+                            freelancerName: profileUser.name,
+                            freelancerUsername: profileUserUsername || slugify(profileUser.name),
+                            freelancerAvatar: profileUser.avatar,
+                            title: 'I will integrate Gemini AI agents and automated workflows',
+                            slug: 'i-will-integrate-gemini-ai-agents',
+                            category: 'AI & Data',
+                            description: 'Integrate Gemini AI into your platform.',
+                            price: 350,
+                            deliveryDays: 2,
+                            rating: 4.9,
+                            reviewsCount: 52,
+                            image: 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=500&h=300&fit=crop',
+                            status: 'published',
+                            featured: false
+                          }
+                        ];
+
+                        return displayGigs.map((gig) => {
+                          const gUrl = getGigUrl(gig);
+                          return (
+                            <div key={gig.id} className="bg-slate-50 rounded-2xl border border-slate-100 p-4 space-y-3 hover:shadow-md transition-shadow">
+                              <img src={gig.image || 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=500&h=300&fit=crop'} className="w-full h-32 rounded-xl object-cover" alt={gig.title} />
+                              <div>
+                                <a 
+                                  href={gUrl} 
+                                  onClick={(e) => navigate(gUrl, e)}
+                                  className="font-bold text-slate-900 hover:text-emerald-600 transition-colors line-clamp-2 block cursor-pointer"
+                                >
+                                  {gig.title}
+                                </a>
+                                <p className="text-[11px] text-slate-500 mt-1">Delivery in {gig.deliveryDays} Days · ★ {gig.rating} ({gig.reviewsCount})</p>
+                              </div>
+                              <div className="flex items-center justify-between pt-2 border-t border-slate-200/60">
+                                <span className="text-sm font-extrabold text-emerald-600">${gig.price}</span>
+                                <a 
+                                  href={gUrl} 
+                                  onClick={(e) => navigate(gUrl, e)}
+                                  className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs"
+                                >
+                                  View Gig
+                                </a>
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+                )}
+
+                {/* Portfolio Showcase Tab Content */}
+                {profileTab === 'portfolio' && (
+                  <div className="space-y-4 pt-4 border-t border-slate-100">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-bold text-slate-900 uppercase tracking-wider">Portfolio Showcase (4 Projects)</h4>
+                      <span className="text-slate-500 text-[11px]">Verified WorkPerHour Projects</span>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="relative group overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                        <img src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=600&h=350&fit=crop" className="w-full h-36 object-cover rounded-xl group-hover:scale-105 transition-transform" />
+                        <h5 className="font-bold text-slate-900">SaaS Analytics Dashboard</h5>
+                        <p className="text-slate-600 text-[11px]">Real-time telemetry, revenue analytics, and multi-tenant billing metrics built with React & Tailwind.</p>
+                      </div>
+                      <div className="relative group overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                        <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=600&h=350&fit=crop" className="w-full h-36 object-cover rounded-xl group-hover:scale-105 transition-transform" />
+                        <h5 className="font-bold text-slate-900">Crypto Escrow Platform</h5>
+                        <p className="text-slate-600 text-[11px]">Secure multi-signature milestone escrow and automated dispute resolution workflow engine.</p>
+                      </div>
+                      <div className="relative group overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                        <img src="https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=600&h=350&fit=crop" className="w-full h-36 object-cover rounded-xl group-hover:scale-105 transition-transform" />
+                        <h5 className="font-bold text-slate-900">AI Workflow Automator</h5>
+                        <p className="text-slate-600 text-[11px]">Gemini AI agent integration platform for automated document summarization and customer support triage.</p>
+                      </div>
+                      <div className="relative group overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                        <img src="https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=600&h=350&fit=crop" className="w-full h-36 object-cover rounded-xl group-hover:scale-105 transition-transform" />
+                        <h5 className="font-bold text-slate-900">High-Performance E-Commerce</h5>
+                        <p className="text-slate-600 text-[11px]">Headless e-commerce storefront with lightning-fast SSR, Stripe payments, and instant product search.</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Reviews Tab Content */}
+                {profileTab === 'reviews' && (
+                  <div className="space-y-4 pt-4 border-t border-slate-100">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-bold text-slate-900 uppercase tracking-wider">Client Reviews & Gigs History (312 Reviews)</h4>
+                      <span className="text-amber-500 font-bold">★ 4.98 Overall Rating</span>
+                    </div>
+                    <div className="space-y-3">
+                      {(() => {
+                        const sellerGigs = gigs.filter(g => g.freelancerId === profileUser.id || g.freelancerName.toLowerCase() === profileUser.name.toLowerCase());
+                        const defaultGig = sellerGigs[0] || {
+                          id: 'gig_sample_1',
+                          freelancerName: profileUser.name,
+                          freelancerUsername: profileUserUsername || slugify(profileUser.name),
+                          title: 'I will build full-stack React & TypeScript web apps with secure Escrow',
+                          slug: 'i-will-build-full-stack-react-typescript-web-apps'
+                        };
+                        const secondGig = sellerGigs[1] || defaultGig;
+
+                        const sampleReviews = [
+                          {
+                            id: 'rev_1',
+                            reviewerName: 'Marcus Reynolds',
+                            initials: 'MR',
+                            rating: 5,
+                            comment: 'Absolute top-tier engineer! Delivered our full-stack React project ahead of schedule with immaculate code quality.',
+                            timeAgo: '2 weeks ago',
+                            gig: defaultGig
+                          },
+                          {
+                            id: 'rev_2',
+                            reviewerName: 'Sarah Jenkins',
+                            initials: 'SK',
+                            rating: 5,
+                            comment: 'Brilliant communication, deep AI expertise, and extremely professional. Will hire again!',
+                            timeAgo: '1 month ago',
+                            gig: secondGig
+                          },
+                          {
+                            id: 'rev_3',
+                            reviewerName: 'David Chen',
+                            initials: 'DC',
+                            rating: 5,
+                            comment: 'Exceptional attention to detail. The escrow and milestone workflow went extremely smoothly.',
+                            timeAgo: '2 months ago',
+                            gig: defaultGig
+                          }
+                        ];
+
+                        return sampleReviews.map(rev => {
+                          const gUrl = getGigUrl(rev.gig as any);
+                          return (
+                            <div key={rev.id} className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-[10px]">{rev.initials}</div>
+                                  <span className="font-bold text-slate-900">{rev.reviewerName}</span>
+                                </div>
+                                <span className="text-amber-500 font-bold">{'★'.repeat(rev.rating)}</span>
+                              </div>
+                              <p className="text-slate-600">"{rev.comment}"</p>
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-2 border-t border-slate-200/50 gap-1 text-[11px]">
+                                <div className="flex items-center gap-1.5 text-slate-500">
+                                  <span>Gig Reviewed:</span>
+                                  <a 
+                                    href={gUrl} 
+                                    onClick={(e) => navigate(gUrl, e)}
+                                    className="font-bold text-slate-900 hover:text-emerald-600 underline cursor-pointer truncate max-w-xs"
+                                  >
+                                    {rev.gig.title}
+                                  </a>
+                                </div>
+                                <span className="text-slate-400">Completed via WorkPerHour Escrow · {rev.timeAgo}</span>
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+                )}
+
+                {/* Endorsements Tab Content */}
+                {profileTab === 'endorsements' && (
+                  <div className="space-y-4 pt-4 border-t border-slate-100">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-bold text-slate-900 uppercase tracking-wider">Professional Endorsements</h4>
+                      <button 
+                        onClick={() => alert('Endorsement submission dialog opened. You can endorse this freelancer for specific technical skills.')}
+                        className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs"
+                      >
+                        + Endorse Freelancer
+                      </button>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-800 font-bold flex items-center justify-center text-[10px]">AL</div>
+                            <div>
+                              <span className="font-bold text-slate-900 block">Alexander Lord</span>
+                              <span className="text-[10px] text-slate-500">VP of Engineering at FinTech Global</span>
+                            </div>
+                          </div>
+                          <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full font-bold text-[10px]">React & TypeScript</span>
+                        </div>
+                        <p className="text-slate-600">"Alexander is an extraordinary architect. His mastery of full-stack TypeScript and secure escrow integrations made our enterprise deployment a massive success."</p>
+                      </div>
+
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full bg-purple-100 text-purple-800 font-bold flex items-center justify-center text-[10px]">EM</div>
+                            <div>
+                              <span className="font-bold text-slate-900 block">Elena Moretti</span>
+                              <span className="text-[10px] text-slate-500">CTO at AI Nexus Labs</span>
+                            </div>
+                          </div>
+                          <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full font-bold text-[10px]">Gemini AI & Architecture</span>
+                        </div>
+                        <p className="text-slate-600">"Deeply impressed by the speed and precision of AI agent integrations delivered. Absolute professional with immaculate code standards."</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
