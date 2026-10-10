@@ -1346,9 +1346,15 @@ export default function App() {
         })
       });
       const newOrd = await res.json();
+      if (!res.ok) {
+        // e.g. insufficient wallet balance: nothing was created or charged
+        window.alert(newOrd?.error || 'Could not place the order.');
+        return;
+      }
       setOrders(prev => [newOrd, ...prev]);
       setSelectedOrder(newOrd);
       fetchMessages(newOrd.id);
+      fetchAllAdminData();
       navigate('/orders');
     } catch (err) {
       console.error(err);
@@ -2330,8 +2336,10 @@ export default function App() {
                           <input 
                             type="number" 
                             value={editUserForm.walletBalance}
-                            onChange={(e) => setEditUserForm(prev => ({ ...prev, walletBalance: Number(e.target.value) }))}
-                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500 font-mono"
+                            readOnly
+                            title="Wallet balances are controlled by the ledger. Use Finance > Adjustments."
+                            onChange={() => {}}
+                            className="w-full px-3 py-2 bg-slate-50 opacity-60 cursor-not-allowed border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-500 font-mono"
                           />
                         </div>
                       </div>
@@ -4113,8 +4121,15 @@ export default function App() {
           )}
 
           {/* MODULE 12: PAYMENTS & EARNINGS */}
-          {(adminTab === 'payments' || path === '/payments') && (
-            <PaymentsModule />
+          {adminTab === 'payments' && (
+            <PaymentsModule 
+              gigs={gigs} 
+              orders={orders} 
+              projects={projects} 
+              proposals={proposals} 
+              currentUser={impersonatedUser || currentUser} 
+              onBalanceUpdate={fetchAllAdminData}
+            />
           )}
 
           {/* MODULE 11: ESCROW MANAGEMENT (MANDATORY 14-DAY PROTECTION) */}
@@ -4558,16 +4573,6 @@ export default function App() {
             )}
           </button>
 
-          {/* Contact Support Button */}
-          <button 
-            onClick={() => setIsSupportModalOpen(true)}
-            className="p-2 sm:px-3 sm:py-2 text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-semibold"
-            title="Contact WorkSphere Support Desk"
-          >
-            <HelpCircle className="w-4 h-4 text-emerald-600" />
-            <span className="hidden sm:inline">Contact Support</span>
-          </button>
-
           <a 
             href="/post-project"
             onClick={(e) => navigate('/post-project', e)}
@@ -4927,9 +4932,8 @@ export default function App() {
             {/* Gigs Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {filteredGigs.map(gig => (
-                <a 
+                <div 
                   key={gig.id} 
-                  href={getGigUrl(gig)}
                   onClick={(e) => navigate(getGigUrl(gig), e)}
                   className="bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-xl transition-all duration-300 flex flex-col group cursor-pointer"
                 >
@@ -4972,7 +4976,16 @@ export default function App() {
                       </a>
 
                       <h3 className="text-sm font-normal text-slate-900 line-clamp-2 group-hover:text-emerald-600 transition-colors mb-3 leading-snug">
-                        {gig.title}
+                        <a
+                          href={getGigUrl(gig)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(getGigUrl(gig), e);
+                          }}
+                          className="hover:text-emerald-600 transition-colors"
+                        >
+                          {gig.title}
+                        </a>
                       </h3>
                     </div>
 
@@ -4991,7 +5004,7 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-                </a>
+                </div>
               ))}
             </div>
           </div>
@@ -6377,7 +6390,7 @@ export default function App() {
                             rating: 5.0,
                             reviewsCount: 84,
                             image: 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=500&h=300&fit=crop',
-                            status: 'published',
+                            status: 'published' as const,
                             featured: true
                           },
                           {
@@ -6395,7 +6408,7 @@ export default function App() {
                             rating: 4.9,
                             reviewsCount: 52,
                             image: 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=500&h=300&fit=crop',
-                            status: 'published',
+                            status: 'published' as const,
                             featured: false
                           }
                         ];
@@ -6598,7 +6611,14 @@ export default function App() {
 
       {isPayments && (
         <div className="max-w-7xl mx-auto px-4 py-8">
-          <PaymentsModule gigs={gigs} orders={orders} projects={projects} proposals={proposals} currentUser={impersonatedUser || currentUser} />
+          <PaymentsModule 
+            gigs={gigs} 
+            orders={orders} 
+            projects={projects} 
+            proposals={proposals} 
+            currentUser={impersonatedUser || currentUser} 
+            onBalanceUpdate={fetchAllAdminData}
+          />
         </div>
       )}
 
@@ -6676,10 +6696,19 @@ export default function App() {
             </ul>
           </div>
 
-          {/* Col 4: Platform Administration */}
+          {/* Col 4: Platform Administration & Support */}
           <div>
-            <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-4">System Administration</h4>
+            <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-4">Support & Administration</h4>
             <ul className="space-y-2.5 text-xs text-slate-600">
+              <li>
+                <button 
+                  onClick={() => setIsSupportModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 font-bold text-slate-900 hover:text-emerald-600 transition-colors cursor-pointer"
+                >
+                  <HelpCircle className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Contact Support Desk</span>
+                </button>
+              </li>
               <li>
                 <a href="/admin" onClick={(e) => navigate('/admin', e)} className="inline-flex items-center gap-1.5 font-bold text-slate-900 hover:text-emerald-600 transition-colors">
                   <Settings className="w-3.5 h-3.5 text-emerald-600" />
@@ -6695,6 +6724,14 @@ export default function App() {
         <div className="max-w-7xl mx-auto pt-8 border-t border-slate-200/60 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-4">
           <p>© 2026 WorkPerHour Marketplace Inc. All rights reserved.</p>
           <div className="flex items-center gap-6">
+            <button 
+              onClick={() => setIsSupportModalOpen(true)}
+              className="font-semibold text-emerald-600 hover:text-emerald-700 inline-flex items-center gap-1 cursor-pointer"
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
+              <span>Contact Support</span>
+            </button>
+            <span>·</span>
             <a href="/admin" onClick={(e) => navigate('/admin', e)} className="font-semibold text-slate-700 hover:text-slate-900">
               Admin Portal
             </a>
