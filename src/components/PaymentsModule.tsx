@@ -262,8 +262,12 @@ export const PaymentsModule: React.FC<PaymentsModuleProps> = ({
     }
   };
 
-  // 2. Withdraw Action
-  const handleWithdrawSubmit = async (e: React.FormEvent) => {
+  // 2. Withdraw Action with Email Verification
+  const [withdrawalStep, setWithdrawalStep] = useState<'form' | 'verify'>('form');
+  const [withdrawalCode, setWithdrawalCode] = useState<string>('');
+  const [mockWithdrawalCodeDisplay, setMockWithdrawalCodeDisplay] = useState<string>('');
+
+  const handleRequestWithdrawalCode = async (e: React.FormEvent) => {
     e.preventDefault();
     const amount = parseFloat(withdrawAmount);
     if (isNaN(amount) || amount <= 0) {
@@ -276,11 +280,35 @@ export const PaymentsModule: React.FC<PaymentsModuleProps> = ({
     }
 
     try {
-      const res = await fetch('/api/payments/withdraw', {
+      const res = await fetch('/api/auth/withdrawal/request-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to send withdrawal verification code');
+
+      setMockWithdrawalCodeDisplay(data.mockWithdrawalCode || '');
+      setWithdrawalStep('verify');
+      showToast('Verification code sent to your registered email.', 'success');
+    } catch (err: any) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  const handleVerifyAndExecuteWithdrawal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!withdrawalCode || withdrawalCode.trim().length === 0) {
+      showToast('Please enter the email verification code.', 'error');
+      return;
+    }
+
+    const amount = parseFloat(withdrawAmount);
+    try {
+      const res = await fetch('/api/auth/withdrawal/verify-and-execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: currentUserId,
+          code: withdrawalCode,
           amount,
           method: withdrawMethod,
           accountDetails: withdrawAccountDetails
@@ -288,10 +316,12 @@ export const PaymentsModule: React.FC<PaymentsModuleProps> = ({
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Withdrawal failed');
+      if (!res.ok) throw new Error(data.error || 'Withdrawal verification failed');
 
-      showToast(`Withdrawal of ${formatMoney(amount)} requested via ${withdrawMethod}. Processing in 1-2 business days.`, 'success');
+      showToast(`Withdrawal of ${formatMoney(amount)} verified and requested via ${withdrawMethod}. Processing in 1-2 business days.`, 'success');
       setIsWithdrawModalOpen(false);
+      setWithdrawalStep('form');
+      setWithdrawalCode('');
       fetchFinancialData();
       onBalanceUpdate?.();
     } catch (err: any) {
@@ -1549,86 +1579,134 @@ export const PaymentsModule: React.FC<PaymentsModuleProps> = ({
                 <h3 className="text-lg font-bold text-slate-900">Withdraw Funds</h3>
                 <p className="text-xs text-slate-500">Transfer available balance to your bank or PayPal</p>
               </div>
-              <button onClick={() => setIsWithdrawModalOpen(false)} className="text-slate-400 hover:text-slate-700">
+              <button onClick={() => { setIsWithdrawModalOpen(false); setWithdrawalStep('form'); }} className="text-slate-400 hover:text-slate-700">
                 <X size={20} />
               </button>
             </div>
 
-            <form onSubmit={handleWithdrawSubmit} className="space-y-4">
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
-                <span className="text-xs text-slate-500 font-semibold">Available to Withdraw</span>
-                <span className="text-base font-extrabold text-emerald-600">{formatMoney(currentAvailableBalance)}</span>
-              </div>
-
-              <div>
-                <div className="flex justify-between items-center">
-                  <label className="text-xs font-bold text-slate-700 uppercase">Withdrawal Amount ($)</label>
-                  <button
-                    type="button"
-                    onClick={() => setWithdrawAmount(currentAvailableBalance.toString())}
-                    className="text-xs font-bold text-emerald-600 hover:underline"
-                  >
-                    Withdraw All
-                  </button>
+            {withdrawalStep === 'form' ? (
+              <form onSubmit={handleRequestWithdrawalCode} className="space-y-4">
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+                  <span className="text-xs text-slate-500 font-semibold">Available to Withdraw</span>
+                  <span className="text-base font-extrabold text-emerald-600">{formatMoney(currentAvailableBalance)}</span>
                 </div>
-                <div className="relative mt-1">
-                  <span className="absolute left-3.5 top-2.5 text-slate-400 font-bold">$</span>
+
+                <div>
+                  <div className="flex justify-between items-center">
+                    <label className="text-xs font-bold text-slate-700 uppercase">Withdrawal Amount ($)</label>
+                    <button
+                      type="button"
+                      onClick={() => setWithdrawAmount(currentAvailableBalance.toString())}
+                      className="text-xs font-bold text-emerald-600 hover:underline"
+                    >
+                      Withdraw All
+                    </button>
+                  </div>
+                  <div className="relative mt-1">
+                    <span className="absolute left-3.5 top-2.5 text-slate-400 font-bold">$</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max={currentAvailableBalance}
+                      step="any"
+                      value={withdrawAmount}
+                      onChange={(e) => setWithdrawAmount(e.target.value)}
+                      className="w-full pl-8 pr-4 py-2 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-emerald-500"
+                      placeholder="Enter amount"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase">Payout Method</label>
+                  <select
+                    value={withdrawMethod}
+                    onChange={(e) => setWithdrawMethod(e.target.value)}
+                    className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-xl text-sm font-medium bg-white"
+                  >
+                    <option value="Bank Transfer">Direct Bank Wire / ACH Transfer</option>
+                    <option value="PayPal">PayPal</option>
+                    <option value="Stripe Payout">Stripe Express</option>
+                    <option value="UPI">UPI Instant (India)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase">Account Details / Reference</label>
                   <input
-                    type="number"
-                    min="1"
-                    max={currentAvailableBalance}
-                    step="any"
-                    value={withdrawAmount}
-                    onChange={(e) => setWithdrawAmount(e.target.value)}
-                    className="w-full pl-8 pr-4 py-2 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-emerald-500"
-                    placeholder="Enter amount"
+                    type="text"
+                    value={withdrawAccountDetails}
+                    onChange={(e) => setWithdrawAccountDetails(e.target.value)}
+                    className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-xl text-xs bg-white focus:outline-emerald-500"
+                    placeholder="e.g. Chase Bank •••• 8821 or user@email.com"
                     required
                   />
                 </div>
-              </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-700 uppercase">Payout Method</label>
-                <select
-                  value={withdrawMethod}
-                  onChange={(e) => setWithdrawMethod(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-xl text-sm font-medium bg-white"
-                >
-                  <option value="Bank Transfer">Direct Bank Wire / ACH Transfer</option>
-                  <option value="PayPal">PayPal</option>
-                  <option value="Stripe Payout">Stripe Express</option>
-                  <option value="UPI">UPI Instant (India)</option>
-                </select>
-              </div>
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-start gap-2">
+                  <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <span>Security Notice: Every withdrawal requires an email verification code for your account protection.</span>
+                </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-700 uppercase">Account Details / Reference</label>
-                <input
-                  type="text"
-                  value={withdrawAccountDetails}
-                  onChange={(e) => setWithdrawAccountDetails(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 border border-slate-200 rounded-xl text-xs bg-white focus:outline-emerald-500"
-                  placeholder="e.g. Chase Bank •••• 8821 or user@email.com"
-                  required
-                />
-              </div>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsWithdrawModalOpen(false)}
+                    className="flex-1 py-2.5 border border-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-50 transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-extrabold transition shadow-xs"
+                  >
+                    Send Verification Code
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handleVerifyAndExecuteWithdrawal} className="space-y-4">
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 space-y-1">
+                  <p className="font-bold flex items-center gap-1.5"><ShieldCheck className="w-4 h-4 text-emerald-600" /> Email Verification Code Required</p>
+                  <p>We sent a 6-digit verification code to your registered email.</p>
+                  {mockWithdrawalCodeDisplay && (
+                    <p className="font-mono bg-white p-1.5 rounded border border-emerald-200 mt-2 text-slate-900 font-bold">
+                      [Dev Testing Code]: {mockWithdrawalCodeDisplay}
+                    </p>
+                  )}
+                </div>
 
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsWithdrawModalOpen(false)}
-                  className="flex-1 py-2.5 border border-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-50 transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-extrabold transition shadow-xs"
-                >
-                  Request Payout
-                </button>
-              </div>
-            </form>
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase">Enter 6-Digit Email Code</label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={withdrawalCode}
+                    onChange={(e) => setWithdrawalCode(e.target.value)}
+                    className="w-full mt-1 px-4 py-3 border border-slate-200 rounded-xl text-center text-lg font-mono font-bold tracking-widest bg-white focus:outline-emerald-500"
+                    placeholder="123456"
+                    required
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setWithdrawalStep('form')}
+                    className="flex-1 py-2.5 border border-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-50 transition"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-extrabold transition shadow-xs"
+                  >
+                    Verify & Complete Withdrawal
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

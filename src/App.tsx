@@ -361,6 +361,37 @@ export default function App() {
   const [userEmails, setUserEmails] = useState<UserEmail[]>([]);
   const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
   const [isSupportModalOpen, setIsSupportModalOpen] = useState(false);
+  const [isUserSwitchModalOpen, setIsUserSwitchModalOpen] = useState(false);
+
+  // Auth & Verification States
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [isSignupModalOpen, setIsSignupModalOpen] = useState(false);
+  const [isVerifyModalOpen, setIsVerifyModalOpen] = useState(false);
+  const [isForgotPasswordModalOpen, setIsForgotPasswordModalOpen] = useState(false);
+
+  const [signupEmail, setSignupEmail] = useState('');
+  const [signupPassword, setSignupPassword] = useState('');
+  const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
+  const [signupMobile, setSignupMobile] = useState('');
+  const [signupName, setSignupName] = useState('');
+
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+
+  const [verifyEmail, setVerifyEmail] = useState('');
+  const [verifyMobile, setVerifyMobile] = useState('');
+  const [emailCodeInput, setEmailCodeInput] = useState('');
+  const [smsCodeInput, setSmsCodeInput] = useState('');
+  const [verificationMode, setVerificationMode] = useState<'email' | 'sms'>('email');
+  const [mockEmailCodeDisplay, setMockEmailCodeDisplay] = useState('');
+  const [mockSmsCodeDisplay, setMockSmsCodeDisplay] = useState('');
+
+  const [forgotQuery, setForgotQuery] = useState('');
+  const [forgotStep, setForgotStep] = useState<'request' | 'verify' | 'reset'>('request');
+  const [forgotCode, setForgotCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [mockForgotCodeDisplay, setMockForgotCodeDisplay] = useState('');
+
   const [supportSubject, setSupportSubject] = useState('');
   const [supportMessage, setSupportMessage] = useState('');
 
@@ -1240,33 +1271,204 @@ export default function App() {
     }
   };
 
-  const handleCreateSupportTicket = async (e: React.FormEvent) => {
+  // Authentication & Verification Action Handlers
+
+  const handleSignupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!supportSubject.trim() || !supportMessage.trim()) return;
-    const activeUser = impersonatedUser || currentUser;
+    if (signupPassword !== signupConfirmPassword) {
+      alert('Passwords do not match.');
+      return;
+    }
     try {
-      const res = await fetch('/api/support-tickets', {
+      const res = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: activeUser.id,
-          userName: activeUser.name,
-          subject: supportSubject.trim(),
-          text: supportMessage.trim(),
-          priority: 'high'
+          email: signupEmail,
+          password: signupPassword,
+          confirmPassword: signupConfirmPassword,
+          mobile: signupMobile,
+          name: signupName
         })
       });
-      const newTicket = await res.json();
-      setSupportTickets(prev => [newTicket, ...prev]);
-      setIsSupportModalOpen(false);
-      setSupportSubject('');
-      setSupportMessage('');
-      alert('Support ticket created successfully! WorkSphere Support Staff will review your inquiry.');
-      fetchAllAdminData();
-    } catch (err) {
-      console.error(err);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Signup failed');
+
+      if (data.token) localStorage.setItem('workperhour_token', data.token);
+      if (data.user) {
+        setCurrentUser(data.user);
+        setImpersonatedUser(null);
+      }
+      setVerifyEmail(signupEmail);
+      setVerifyMobile(signupMobile);
+      setMockEmailCodeDisplay(data.mockEmailCode || '');
+      setMockSmsCodeDisplay(data.mockSmsCode || '');
+      setIsSignupModalOpen(false);
+      setIsVerifyModalOpen(true);
+      alert('Account created successfully! Please verify your email or mobile number.');
+    } catch (err: any) {
+      alert(err.message);
     }
   };
+
+  const handleVerifyEmailSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/auth/verify-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: verifyEmail, code: emailCodeInput })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Verification failed');
+      alert('Email verified successfully!');
+      setIsVerifyModalOpen(false);
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleResendEmailCode = async () => {
+    try {
+      const res = await fetch('/api/auth/resend-email-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: verifyEmail })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Resend failed');
+      setMockEmailCodeDisplay(data.mockEmailCode || '');
+      alert('New verification code sent to your email.');
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleVerifySmsSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/auth/verify-sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobile: verifyMobile, code: smsCodeInput })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'SMS verification failed');
+      alert('Mobile verified successfully via SMS!');
+      setIsVerifyModalOpen(false);
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleResendSmsCode = async () => {
+    try {
+      const res = await fetch('/api/auth/resend-sms-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobile: verifyMobile })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Resend SMS failed');
+      setMockSmsCodeDisplay(data.mockSmsCode || '');
+      alert('New SMS OTP dispatched.');
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: loginEmail, password: loginPassword })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Login failed');
+
+      if (data.token) localStorage.setItem('workperhour_token', data.token);
+      if (data.user) {
+        setCurrentUser(data.user);
+        setImpersonatedUser(null);
+      }
+      setIsLoginModalOpen(false);
+      setLoginEmail('');
+      setLoginPassword('');
+      alert('Logged in successfully!');
+      window.location.reload();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleForgotRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/auth/forgot-password/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailOrMobile: forgotQuery })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+      setMockForgotCodeDisplay(data.mockRecoveryCode || '');
+      setForgotStep('verify');
+      alert('Recovery code sent.');
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleForgotVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/auth/forgot-password/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailOrMobile: forgotQuery, code: forgotCode })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Verification failed');
+      setForgotStep('reset');
+      alert('Code verified successfully. Enter new password.');
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleForgotReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword.length < 6) {
+      alert('Password must be at least 6 characters.');
+      return;
+    }
+    try {
+      const res = await fetch('/api/auth/forgot-password/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailOrMobile: forgotQuery, code: forgotCode, newPassword })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Password reset failed');
+      alert('Password reset successfully! Please log in with your new password.');
+      setIsForgotPasswordModalOpen(false);
+      setForgotStep('request');
+      setForgotCode('');
+      setNewPassword('');
+      setIsLoginModalOpen(true);
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+
+
+
+
+
+
 
   const handleResolveDispute = async (id: string, resolutionStatus: string) => {
     try {
@@ -1378,27 +1580,7 @@ export default function App() {
   };
 
   const handleGenerateAIProposal = async (projectTitle: string, projectDesc: string) => {
-    setIsGeneratingAIProposal(true);
-    try {
-      const res = await fetch('/api/ai/proposal', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectTitle,
-          projectDescription: projectDesc,
-          freelancerTitle: currentUser.title,
-          freelancerSkills: ['React', 'TypeScript', 'Node.js', 'UI/UX']
-        })
-      });
-      const data = await res.json();
-      if (data.proposal) {
-        setProposalCover(data.proposal);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsGeneratingAIProposal(false);
-    }
+    setProposalCover(`Dear Client,\n\nI am thrilled to submit my proposal for "${projectTitle}". With extensive experience as a Senior Full-Stack Architect specializing in scalable web applications, secure escrow workflows, and high-performance React/TypeScript systems, I am confident in delivering exceptional results.\n\nProject Understanding: "${projectDesc.substring(0, 100)}..."\n\nI propose a robust architecture with continuous updates and 100% escrow protection. I am ready to start immediately.\n\nBest regards,\n${impersonatedUser ? impersonatedUser.name : currentUser.name}`);
   };
 
   const handleSubmitProposal = async (e: React.FormEvent, projectId: string) => {
@@ -1429,25 +1611,12 @@ export default function App() {
   };
 
   const handleOptimizeGigWithAI = async () => {
-    if (!newGigTitle || !newGigDesc) {
-      alert('Please enter a title and description first.');
+    if (!newGigTitle) {
+      alert('Please enter a gig title first.');
       return;
     }
-    setIsOptimizingGig(true);
-    try {
-      const res = await fetch('/api/ai/optimize-gig', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: newGigTitle, description: newGigDesc })
-      });
-      const data = await res.json();
-      if (data.optimizedTitle) setNewGigTitle(data.optimizedTitle);
-      if (data.optimizedDescription) setNewGigDesc(data.optimizedDescription);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsOptimizingGig(false);
-    }
+    setNewGigTitle(`Professional ${newGigTitle} with 100% Escrow Guarantee`);
+    setNewGigDesc(`✨ Premium Service Offering:\n\n- High-performance delivery tailored to your exact specifications.\n- Thoroughly tested code and enterprise-grade architecture.\n- 14 days of post-launch support and secure Escrow protection.\n\nLet's discuss your project requirements today!`);
   };
 
   const handlePublishGig = async (e: React.FormEvent) => {
@@ -4510,7 +4679,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Top Bar Contract */}
       <header className="sticky top-0 z-40 bg-white border-b border-slate-200/80 backdrop-blur-md px-6 py-3.5 flex items-center justify-between shadow-xs">
         {/* Zone 1: Brand */}
         <div className="flex items-center gap-3">
@@ -4525,7 +4693,7 @@ export default function App() {
           </a>
         </div>
 
-        {/* Zone 2: Nav links with clean pathnames */}
+        {/* Zone 2: Nav links */}
         <nav className="hidden lg:flex items-center gap-7 text-sm font-medium text-slate-600">
           <a 
             href="/gigs" 
@@ -4541,214 +4709,46 @@ export default function App() {
           >
             Buyer Requests
           </a>
-          <a 
-            href="/orders" 
-            onClick={(e) => navigate('/orders', e)}
-            className={`transition-colors hover:text-slate-900 py-1 ${isOrders ? 'text-slate-900 font-semibold border-b-2 border-slate-900' : ''}`}
-          >
-            My Orders & Escrow
-          </a>
-          <a 
-            href="/messages" 
-            onClick={(e) => navigate('/messages', e)}
-            className={`transition-colors hover:text-slate-900 py-1 ${isMessages ? 'text-slate-900 font-semibold border-b-2 border-slate-900' : ''}`}
-          >
-            Live Chat
-          </a>
+
         </nav>
 
         {/* Zone 3: Primary Actions & Profile */}
         <div className="flex items-center gap-3">
-          {/* Email Inbox Button */}
-          <button 
-            onClick={() => setIsEmailModalOpen(true)}
-            className="relative p-2 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center justify-center"
-            title="Official Email Inbox & System Notices"
-          >
-            <MessageSquare className="w-4 h-4 text-slate-700" />
-            {userEmails.filter(e => !e.read).length > 0 && (
-              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white font-bold text-[9px] flex items-center justify-center animate-pulse">
-                {userEmails.filter(e => !e.read).length}
-              </span>
-            )}
-          </button>
-
-          <a 
-            href="/post-project"
-            onClick={(e) => navigate('/post-project', e)}
-            className="hidden md:flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 border border-slate-200 hover:bg-slate-200 rounded-lg transition-colors"
-          >
-            <PlusCircle className="w-4 h-4 text-emerald-600" />
-            <span>Post Project</span>
-          </a>
-          <a 
-            href="/create-gig"
-            onClick={(e) => navigate('/create-gig', e)}
-            className="hidden md:flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-900 bg-emerald-400 rounded-lg hover:bg-emerald-300 transition-colors shadow-xs"
-          >
-            <PlusCircle className="w-4 h-4" />
-            <span>Create Gig</span>
-          </a>
-
-          <div className="relative pl-2 border-l border-slate-200">
-            <div 
-              onClick={() => setIsUserDropdownOpen(!isUserDropdownOpen)}
-              className="flex items-center gap-2 cursor-pointer p-1 rounded-xl hover:bg-slate-100 transition-colors"
-            >
-              <img src={impersonatedUser ? impersonatedUser.avatar : currentUser.avatar} className="w-9 h-9 rounded-full object-cover ring-2 ring-emerald-500/20" />
-              <div className="hidden xl:block text-left">
-                <div className="flex items-center gap-1">
-                  <span className="text-xs font-semibold text-slate-900 block">
-                    {impersonatedUser ? impersonatedUser.name : currentUser.name}
-                  </span>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
-                </div>
-                <span className="text-[11px] text-slate-500 block truncate max-w-[120px]">
-                  {impersonatedUser ? 'Impersonated User' : currentUser.title}
-                </span>
+          {!currentUser ? (
+            <>
+              <button onClick={() => setIsLoginModalOpen(true)} className="px-4 py-2 text-sm font-semibold text-slate-700 hover:text-slate-900">Login</button>
+              <button onClick={() => setIsSignupModalOpen(true)} className="px-4 py-2 text-sm font-semibold text-white bg-emerald-500 rounded-lg hover:bg-emerald-600">Sign Up</button>
+            </>
+          ) : (
+            <div className="relative pl-2 border-l border-slate-200">
+              <div 
+                onClick={() => setIsUserDropdownOpen(!isUserDropdownOpen)}
+                className="flex items-center gap-2 cursor-pointer p-1 rounded-xl hover:bg-slate-100 transition-colors"
+              >
+                <img src={currentUser.avatar} alt={currentUser.name} className="w-8 h-8 rounded-full object-cover border border-slate-200" />
               </div>
-            </div>
-
-            {/* Tiny Dropdown Menu */}
-            {isUserDropdownOpen && (
-              <div className="absolute right-0 mt-2 w-64 bg-white border border-slate-200 rounded-2xl shadow-2xl py-3 z-50 text-xs">
-                <div className="px-4 py-2.5 border-b border-slate-100 flex items-center justify-between mb-1">
-                  <div>
-                    <span className="font-bold text-slate-900 text-sm block">{impersonatedUser ? impersonatedUser.name : currentUser.name}</span>
-                    <span className="text-[11px] text-slate-400 font-mono">ID: {impersonatedUser ? impersonatedUser.id : currentUser.id}</span>
-                  </div>
-                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    Available
-                  </span>
-                </div>
-
-                {/* Wallet & Available Funds (Excluding Escrow Funds) */}
-                <div className="mx-3 my-2 px-3 py-2.5 bg-emerald-50/80 rounded-xl border border-emerald-100 flex items-center justify-between text-slate-800">
-                  <div className="flex items-center gap-2">
-                    <Wallet className="w-4 h-4 text-emerald-600" />
-                    <div>
-                      <span className="font-bold text-[11px] block text-emerald-900">Wallet Balance</span>
-                      <span className="text-[9px] text-emerald-600">Spendable Funds</span>
-                    </div>
-                  </div>
-                  <span className="font-black text-emerald-700 text-sm">
-                    ${(impersonatedUser ? impersonatedUser.walletBalance : currentUser.walletBalance).toLocaleString()}
-                  </span>
-                </div>
-
-                <div className="px-2 py-1 space-y-0.5">
-                  <button 
-                    onClick={(e) => { 
-                      const uname = slugify(impersonatedUser ? impersonatedUser.name : currentUser.name);
-                      navigate(`/${uname}`, e); 
-                      setIsUserDropdownOpen(false); 
-                    }}
-                    className="w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium transition"
-                  >
-                    <User className="w-4 h-4 text-emerald-600" />
-                    <span>View Profile</span>
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={(e) => { navigate('/messages', e); setIsUserDropdownOpen(false); }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium transition"
-                  >
-                    <Briefcase className="w-4 h-4 text-emerald-600" />
-                    <span>My Workstreams & Messages</span>
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={(e) => { navigate('/create-gig', e); setIsUserDropdownOpen(false); }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium transition"
-                  >
-                    <Layers className="w-4 h-4 text-indigo-600" />
-                    <span>My Gigs / Services</span>
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={(e) => { navigate('/buyer-activity', e); setIsUserDropdownOpen(false); }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium transition"
-                  >
-                    <ShoppingBag className="w-4 h-4 text-emerald-600" />
-                    <span>Buyer Activity</span>
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={(e) => { navigate('/freelancer-activity', e); setIsUserDropdownOpen(false); }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium transition"
-                  >
-                    <Briefcase className="w-4 h-4 text-emerald-600" />
-                    <span>Freelancer Activity</span>
-                  </button>
-                  <button 
-                    onClick={(e) => { navigate('/payments/myMoney?ref=topmenu_loggedin', e); setIsUserDropdownOpen(false); }}
-                    className="w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium transition"
-                  >
-                    <CreditCard className="w-4 h-4 text-emerald-600" />
-                    <span>Payments</span>
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={(e) => { navigate('/admin', e); setIsUserDropdownOpen(false); }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium transition"
-                  >
-                    <ShieldCheck className="w-4 h-4 text-purple-600" />
-                    <span>Admin Panel</span>
-                  </button>
-                </div>
-
-                <div className="border-t border-slate-100 my-2"></div>
-
-                <div className="px-2 space-y-0.5">
-                  <button 
-                    onClick={() => { setIsUserDropdownOpen(false); alert('Switched to Buyer Mode'); }}
-                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium flex items-center gap-2.5 transition"
-                  >
-                    <Users className="w-4 h-4 text-slate-500" />
-                    <span>Switch to Buyer Mode</span>
-                  </button>
-                  <button 
-                    onClick={() => { setIsUserDropdownOpen(false); alert('Account settings & preferences'); }}
-                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium flex items-center gap-2.5 transition"
-                  >
+              {isUserDropdownOpen && (
+                <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-lg border border-slate-100 p-2 z-50">
+                  {/* User menu content */}
+                  <div className="px-3 py-2 text-xs font-semibold text-slate-500 uppercase">My Account</div>
+                  <button onClick={() => { setIsUserDropdownOpen(false); alert('Account settings'); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium flex items-center gap-2.5 transition">
                     <Settings className="w-4 h-4 text-slate-500" />
                     <span>Account Settings</span>
                   </button>
-                  <button 
-                    onClick={() => { setIsUserDropdownOpen(false); alert('Signed out successfully'); }}
-                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-50 text-red-600 font-medium flex items-center gap-2.5 transition"
-                  >
+                  <button onClick={() => { setIsUserDropdownOpen(false); setCurrentUser(null); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-50 text-red-600 font-medium flex items-center gap-2.5 transition">
                     <LogOut className="w-4 h-4 text-red-500" />
                     <span>Log Out</span>
                   </button>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
       </header>
 
-      {/* ACCOUNT STATUS ALERT BANNER (SUSPENDED / RESTRICTED) */}
-      {((impersonatedUser ? impersonatedUser.status : currentUser.status) === 'suspended' || (impersonatedUser ? impersonatedUser.status : currentUser.status) === 'restricted') && (
-        <div className="bg-red-600 text-white px-6 py-3 flex items-center justify-between text-xs font-bold shadow-md sticky top-14 z-30">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 text-amber-300 animate-bounce" />
-            <span>
-              ACCOUNT NOTICE: Your WorkSphere account is currently 
-              <span className="uppercase underline mx-1">{(impersonatedUser || currentUser).status}</span>.
-              An official notice was sent to your Chat & Email. Please contact support immediately.
-            </span>
-          </div>
-          <button 
-            onClick={() => setIsSupportModalOpen(true)}
-            className="px-4 py-1.5 bg-white text-red-900 rounded-lg font-extrabold hover:bg-slate-100 transition-colors shadow-xs flex items-center gap-1.5"
-          >
-            <HelpCircle className="w-4 h-4" />
-            <span>Contact Support Desk</span>
-          </button>
-        </div>
-      )}
+
+
+
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8">
@@ -4775,7 +4775,7 @@ export default function App() {
                   <Search className="w-5 h-5 text-slate-400 ml-3" />
                   <input 
                     type="text" 
-                    placeholder="Search services (e.g. React, UI/UX, Gemini AI)..." 
+                    placeholder="Search services (e.g. React, UI/UX, Automation)..." 
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none"
@@ -5358,7 +5358,7 @@ export default function App() {
                     className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-semibold hover:bg-emerald-100 transition-colors border border-emerald-200"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>{isGeneratingAIProposal ? 'Generating AI Cover Letter...' : 'Write with Gemini AI'}</span>
+                    <span>Generate Cover Letter</span>
                   </button>
                 </div>
                 <textarea 
@@ -5820,7 +5820,7 @@ export default function App() {
           <div className="max-w-2xl mx-auto bg-white rounded-3xl border border-slate-200 p-8 shadow-xs">
             <div className="mb-8">
               <h1 className="text-2xl font-bold tracking-tight text-slate-900">Create a New Service Gig</h1>
-              <p className="text-sm text-slate-500">Publish your freelance service and leverage Gemini AI to optimize conversion.</p>
+              <p className="text-sm text-slate-500">Publish your freelance service and leverage automated tools to optimize conversion.</p>
             </div>
 
             <form onSubmit={handlePublishGig} className="space-y-6">
@@ -6180,6 +6180,62 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* USER SWITCH MODAL */}
+      {isUserSwitchModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Users className="w-5 h-5 text-emerald-600" />
+                  <span>Switch User Account</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">Instantly switch between registered users, freelancers, clients, and administrators.</p>
+              </div>
+              <button 
+                onClick={() => setIsUserSwitchModalOpen(false)}
+                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-colors text-xs font-bold"
+              >
+                ✕ Close
+              </button>
+            </div>
+
+            <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+              {usersList.map((u) => {
+                const isActive = (impersonatedUser ? impersonatedUser.id : currentUser.id) === u.id;
+                return (
+                  <div 
+                    key={u.id}
+                    onClick={() => {
+                      setImpersonatedUser(u);
+                      setIsUserSwitchModalOpen(false);
+                    }}
+                    className={`flex items-center justify-between p-3.5 rounded-2xl border transition-all cursor-pointer ${isActive ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-900'}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <img src={u.avatar} className="w-10 h-10 rounded-full object-cover ring-2 ring-emerald-500/20" />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm">{u.name}</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${isActive ? 'bg-emerald-400 text-slate-900' : 'bg-slate-200 text-slate-700'}`}>
+                            {u.role.toUpperCase()}
+                          </span>
+                        </div>
+                        <span className={`text-xs ${isActive ? 'text-slate-300' : 'text-slate-500'}`}>{u.email}</span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className={`text-xs font-black block ${isActive ? 'text-emerald-400' : 'text-slate-900'}`}>${u.walletBalance?.toLocaleString() || 0}</span>
+                      <span className={`text-[10px] ${isActive ? 'text-slate-400' : 'text-slate-500'}`}>Wallet</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -6732,6 +6788,14 @@ export default function App() {
               <span>Contact Support</span>
             </button>
             <span>·</span>
+            <button 
+              onClick={() => setIsUserSwitchModalOpen(true)}
+              className="font-semibold text-slate-700 hover:text-slate-900 inline-flex items-center gap-1 cursor-pointer"
+            >
+              <Users className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Switch User</span>
+            </button>
+            <span>·</span>
             <a href="/admin" onClick={(e) => navigate('/admin', e)} className="font-semibold text-slate-700 hover:text-slate-900">
               Admin Portal
             </a>
@@ -6742,6 +6806,90 @@ export default function App() {
           </div>
         </div>
       </footer>
+      {/* LOGIN MODAL */}
+      {isLoginModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200">
+            <h2 className="text-xl font-bold mb-4">Login to WorkPerHour</h2>
+            <form onSubmit={handleLoginSubmit} className="space-y-4">
+              <input type="email" placeholder="Email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} required className="w-full px-4 py-2 border rounded-xl" />
+              <input type="password" placeholder="Password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} required className="w-full px-4 py-2 border rounded-xl" />
+              <button type="submit" className="w-full py-2 bg-slate-900 text-white rounded-xl">Login</button>
+              <button type="button" onClick={() => { setIsLoginModalOpen(false); setIsForgotPasswordModalOpen(true); }} className="w-full text-xs text-slate-500">Forgot Password?</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* SIGNUP MODAL */}
+      {isSignupModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200">
+            <h2 className="text-xl font-bold mb-4">Register for WorkPerHour</h2>
+            <form onSubmit={handleSignupSubmit} className="space-y-4">
+              <input type="text" placeholder="Name" value={signupName} onChange={(e) => setSignupName(e.target.value)} required className="w-full px-4 py-2 border rounded-xl" />
+              <input type="email" placeholder="Email" value={signupEmail} onChange={(e) => setSignupEmail(e.target.value)} required className="w-full px-4 py-2 border rounded-xl" />
+              <input type="text" placeholder="Mobile Number" value={signupMobile} onChange={(e) => setSignupMobile(e.target.value)} required className="w-full px-4 py-2 border rounded-xl" />
+              <input type="password" placeholder="Password" value={signupPassword} onChange={(e) => setSignupPassword(e.target.value)} required className="w-full px-4 py-2 border rounded-xl" />
+              <input type="password" placeholder="Confirm Password" value={signupConfirmPassword} onChange={(e) => setSignupConfirmPassword(e.target.value)} required className="w-full px-4 py-2 border rounded-xl" />
+              <button type="submit" className="w-full py-2 bg-emerald-500 text-white rounded-xl">Sign Up</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* VERIFY MODAL */}
+      {isVerifyModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200">
+            <h2 className="text-xl font-bold mb-4">Verify Your Account</h2>
+            <div className="mb-4">
+              <button onClick={() => setVerificationMode('email')} className={`mr-2 px-3 py-1 rounded ${verificationMode === 'email' ? 'bg-slate-900 text-white' : 'bg-slate-200'}`}>Email</button>
+              <button onClick={() => setVerificationMode('sms')} className={`px-3 py-1 rounded ${verificationMode === 'sms' ? 'bg-slate-900 text-white' : 'bg-slate-200'}`}>SMS</button>
+            </div>
+            {verificationMode === 'email' ? (
+              <form onSubmit={handleVerifyEmailSubmit} className="space-y-4">
+                <input type="text" placeholder="Enter Email Code" value={emailCodeInput} onChange={(e) => setEmailCodeInput(e.target.value)} required className="w-full px-4 py-2 border rounded-xl" />
+                <button type="submit" className="w-full py-2 bg-emerald-500 text-white rounded-xl">Verify Email</button>
+                <button type="button" onClick={handleResendEmailCode} className="w-full text-xs">Resend Email Code</button>
+              </form>
+            ) : (
+              <form onSubmit={handleVerifySmsSubmit} className="space-y-4">
+                <input type="text" placeholder="Enter SMS Code" value={smsCodeInput} onChange={(e) => setSmsCodeInput(e.target.value)} required className="w-full px-4 py-2 border rounded-xl" />
+                <button type="submit" className="w-full py-2 bg-emerald-500 text-white rounded-xl">Verify SMS</button>
+                <button type="button" onClick={handleResendSmsCode} className="w-full text-xs">Resend SMS Code</button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* FORGOT PASSWORD MODAL */}
+      {isForgotPasswordModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200">
+            <h2 className="text-xl font-bold mb-4">Forgot Password</h2>
+            {forgotStep === 'request' && (
+              <form onSubmit={handleForgotRequest} className="space-y-4">
+                <input type="text" placeholder="Email or Mobile" value={forgotQuery} onChange={(e) => setForgotQuery(e.target.value)} required className="w-full px-4 py-2 border rounded-xl" />
+                <button type="submit" className="w-full py-2 bg-slate-900 text-white rounded-xl">Request Code</button>
+              </form>
+            )}
+            {forgotStep === 'verify' && (
+              <form onSubmit={handleForgotVerify} className="space-y-4">
+                <input type="text" placeholder="Enter Code" value={forgotCode} onChange={(e) => setForgotCode(e.target.value)} required className="w-full px-4 py-2 border rounded-xl" />
+                <button type="submit" className="w-full py-2 bg-slate-900 text-white rounded-xl">Verify Code</button>
+              </form>
+            )}
+            {forgotStep === 'reset' && (
+              <form onSubmit={handleForgotReset} className="space-y-4">
+                <input type="password" placeholder="New Password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required className="w-full px-4 py-2 border rounded-xl" />
+                <button type="submit" className="w-full py-2 bg-slate-900 text-white rounded-xl">Reset Password</button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

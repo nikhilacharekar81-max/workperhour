@@ -101,7 +101,6 @@ export interface EmailsIntegrationsSettings {
   stripeEnabled: boolean;
   stripePublishableKeyMasked: string;
   razorpayEnabled: boolean;
-  geminiAiEnabled: boolean;
 }
 
 export interface SettingsHistoryItem {
@@ -208,8 +207,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettingsState = {
     sendDisputeAdminAlerts: true,
     stripeEnabled: true,
     stripePublishableKeyMasked: 'pk_test_51Mz...••••',
-    razorpayEnabled: true,
-    geminiAiEnabled: true
+    razorpayEnabled: true
   }
 };
 
